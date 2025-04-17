@@ -13,7 +13,7 @@ from airfoil_database.classes.AirfoilDatabase import AirfoilDatabase
 from airfoil_database.classes.AirfoilSeries import AirfoilSeries
 # Import from the fixer module artifact ID pointcloud_fixer_module_v3
 from airfoil_database.xfoil.fix_point_cloud import parse_airfoil_dat_file, format_pointcloud_array, DEFAULT_FIXER_CONFIG
-from airfoil_database.utilities.web.parse_dat_file import parse_airfoil_dat
+from airfoil_database.utilities.web.custom_parser import parse_file
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -121,7 +121,7 @@ def parse_file_worker(filepath):
     try:
         # Use the parser from the Canvas artifact
         #airfoil_name_from_file, points_array = parse_airfoil_dat_file(filepath)
-        points_array = parse_airfoil_dat(filepath)
+        points_array = parse_file(filepath)
         airfoil_name_from_file = None
 
         if points_array is None:

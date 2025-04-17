@@ -1134,23 +1134,23 @@ if __name__ == "__main__":
     mach_list = 0.2
     alpha_list = [0, 5]
     ncrit_list = 9
-    airfoil_name = 'fx67k150'
+    airfoil_name = 'ag10'
 
     db = AirfoilDatabase(db_dir="airfoil_database", db_name='selig_airfoils.db')
-    """db.run_airfoil_through_xfoil(airfoil_name, 
+    db.run_airfoil_through_xfoil(airfoil_name, 
                                  reynolds_list, 
                                  mach_list, 
                                  alpha_list, 
                                  ncrit_list)
-    out = db.get_aero_coeffs(airfoil_name)"""
-    #print(out)
-    out = db.get_airfoil_data(airfoil_name)
+    out = db.get_aero_coeffs(airfoil_name)
+    print(out)
+    """out = db.get_airfoil_data(airfoil_name)
     out_folder = rf'D:\Mitchell\School\airfoils\{airfoil_name}'
     if not os.path.exists(out_folder):
         os.mkdir(out_folder)
     with open(os.path.join(out_folder, f'{airfoil_name}_0.dat'), 'w+') as file:
         file.write(out[1])
-    print(out)
+    print(out)"""
     """db.fix_all_airfoils()
     out = db.get_airfoil_data('ag10')
     print(out)"""

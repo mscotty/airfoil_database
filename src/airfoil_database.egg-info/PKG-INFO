@@ -1,0 +1,31 @@
+Metadata-Version: 2.4
+Name: airfoil_database
+Version: 0.0.1
+Summary: Airfoil Database Code
+Author-email: Mitchell Scott <mitchell.scott.7@us.af.mil>
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.12
+Requires-Python: >=3.8
+Description-Content-Type: text/markdown
+Requires-Dist: numpy
+Requires-Dist: ambiance
+Requires-Dist: pandas
+Requires-Dist: scipy
+Requires-Dist: seaborn
+Requires-Dist: plotly
+Requires-Dist: kaleido
+Requires-Dist: requests
+Requires-Dist: beautifulsoup4
+Requires-Dist: selenium
+Requires-Dist: shapely
+Requires-Dist: PyQt6
+Requires-Dist: statsmodels
+Requires-Dist: scikit-learn
+Provides-Extra: dev
+Requires-Dist: pytest; extra == "dev"
+Requires-Dist: mypy; extra == "dev"
+Requires-Dist: flake8; extra == "dev"
+Requires-Dist: isort; extra == "dev"
+Requires-Dist: pylint; extra == "dev"
+Requires-Dist: autopep8; extra == "dev"
+Requires-Dist: tox; extra == "dev"

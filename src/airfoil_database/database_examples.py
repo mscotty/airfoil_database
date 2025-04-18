@@ -1,10 +1,10 @@
 import os
 import matplotlib.pyplot as plt
 
-from DASC500.classes.AirfoilDatabase import AirfoilDatabase
-from DASC500.classes.XFoilRunner import XFoilRunner
-from DASC500.classes.DataAnalysis import DataAnalysis
-from DASC500.utilities.get_top_level_module import get_top_level_module_path
+from airfoil_database.classes.AirfoilDatabase import AirfoilDatabase
+from airfoil_database.classes.XFoilRunner import XFoilRunner
+from airfoil_database.classes.DataAnalysis import DataAnalysis
+from airfoil_database.utilities.get_top_level_module import get_top_level_module_path
 
 output_folder = os.path.join(get_top_level_module_path(), '../../outputs/project')
 def test():

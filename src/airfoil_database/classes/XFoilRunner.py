@@ -71,7 +71,7 @@ def _run_xfoil_alpha_worker(xfoil_executable, airfoil_name, points_str, reynolds
         vpar
         n {ncrit}
 
-        iter 200
+        iter 20
         re {reynolds}
         mach {mach}
         visc

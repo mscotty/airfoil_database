@@ -1130,20 +1130,21 @@ class AirfoilDatabase:
 
 if __name__ == "__main__":
     # Example usage of the AirfoilDatabase class:
-    reynolds_list = [10000, 200000]
+    reynolds_list = [10000, 200000, 500000, 1000000]
     mach_list = 0.2
-    alpha_list = [0, 5]
+    alpha_list = [-20, -15, -10, -5, 0, 5, 10, 15, 20]
     ncrit_list = 9
     airfoil_name = 'ag10'
 
     db = AirfoilDatabase(db_dir="airfoil_database", db_name='selig_airfoils.db')
-    db.run_airfoil_through_xfoil(airfoil_name, 
+    """db.run_airfoil_through_xfoil(airfoil_name, 
                                  reynolds_list, 
                                  mach_list, 
                                  alpha_list, 
                                  ncrit_list)
     out = db.get_aero_coeffs(airfoil_name)
-    print(out)
+    print(out)"""
+    db.run_all_airfoils(reynolds_list, mach_list, alpha_list, ncrit_list)
     """out = db.get_airfoil_data(airfoil_name)
     out_folder = rf'D:\Mitchell\School\airfoils\{airfoil_name}'
     if not os.path.exists(out_folder):

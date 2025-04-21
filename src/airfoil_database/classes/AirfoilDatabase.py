@@ -32,6 +32,8 @@ from airfoil_database.xfoil.fix_point_cloud import *
 from airfoil_database.classes.XFoilRunner import XFoilRunner
 from airfoil_database.classes.AirfoilSeries import AirfoilSeries
 
+from airfoil_database.utilities.get_files_starting_with import get_files_starting_with
+
 class AirfoilDatabase:
     def __init__(self, db_name="airfoil_data.db", db_dir="."):
         self.db_path = os.path.join(db_dir, db_name) # Path to the database
@@ -1049,7 +1051,7 @@ class AirfoilDatabase:
             tolerance (float): The tolerance for the search.
             tolerance_type (str): "absolute" or "percentage".
         """
-        valid_parameters = ["reynolds", "alpha", "cl", "cd", "cm"]
+        valid_parameters = ["reynolds", "alpha", "mach", "ncrit", "cl", "cd", "cm"]
 
         if parameter not in valid_parameters:
             print(f"Invalid parameter. Choose from: {', '.join(valid_parameters)}")
@@ -1067,10 +1069,13 @@ class AirfoilDatabase:
             else:
                 print("Invalid tolerance_type. Choose 'absolute' or 'percentage'.")
                 return []
-
-            query = f"SELECT airfoil_name FROM xfoil_results WHERE {parameter} BETWEEN ? AND ?"
+            print(parameter)
+            query = f"SELECT name FROM aero_coeffs WHERE {parameter} BETWEEN ? AND ?"
+            print(lower_bound)
+            print(upper_bound)
             cursor.execute(query, (lower_bound, upper_bound))
             results = cursor.fetchall()
+            print(results)
 
             airfoil_names = [row[0] for row in results]
             if airfoil_names:
@@ -1134,17 +1139,23 @@ if __name__ == "__main__":
     mach_list = 0.2
     alpha_list = [-20, -15, -10, -5, 0, 5, 10, 15, 20]
     ncrit_list = 9
-    airfoil_name = 'ag10'
+    airfoil_names = []
+    folder = r'D:\Mitchell\School\2025 Winter\github\airfoil_database\airfoil_dat_files'
+    files = get_files_starting_with(folder, 'm')
+    #print(files)
+    #airfoil_name = 'ag10'
 
-    db = AirfoilDatabase(db_dir="airfoil_database", db_name='selig_airfoils.db')
-    """db.run_airfoil_through_xfoil(airfoil_name, 
-                                 reynolds_list, 
-                                 mach_list, 
-                                 alpha_list, 
-                                 ncrit_list)
-    out = db.get_aero_coeffs(airfoil_name)
-    print(out)"""
-    db.run_all_airfoils(reynolds_list, mach_list, alpha_list, ncrit_list)
+    db = AirfoilDatabase(db_dir="airfoil_database", db_name='airfoils.db')
+    for file in files:
+        airfoil_name = file.split('.')[0]
+        db.run_airfoil_through_xfoil(airfoil_name, 
+                                    reynolds_list, 
+                                    mach_list, 
+                                    alpha_list, 
+                                    ncrit_list)
+    #out = db.get_aero_coeffs(airfoil_name)
+    #print(out)
+    #db.run_all_airfoils(reynolds_list, mach_list, alpha_list, ncrit_list)
     """out = db.get_airfoil_data(airfoil_name)
     out_folder = rf'D:\Mitchell\School\airfoils\{airfoil_name}'
     if not os.path.exists(out_folder):

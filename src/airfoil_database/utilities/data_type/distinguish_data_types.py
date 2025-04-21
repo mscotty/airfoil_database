@@ -2,7 +2,7 @@ import os
 
 import pandas as pd
 
-from DASC500.utilities.data_type.is_float import is_float
+from airfoil_database.utilities.data_type.is_float import is_float
 
 def distinguish_data_types(input):
     """!

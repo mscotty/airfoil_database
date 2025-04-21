@@ -1,6 +1,6 @@
 import statsmodels.api as sm
 import pandas as pd
-from DASC500.formulas.statistics.compute_vif import compute_vif
+from airfoil_database.formulas.statistics.compute_vif import compute_vif
 
 def stepwise_parsimonious_regression(df, 
                                      target_var, 

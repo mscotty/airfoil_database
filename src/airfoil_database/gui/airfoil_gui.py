@@ -105,7 +105,6 @@ class AirfoilViewer(QWidget):
         else:
             QMessageBox.warning(self, "Clear Database", "No database is currently open.")
 
-    # Suggestion 4: Merged load_airfoil_names into populate_airfoil_lists
     def populate_airfoil_lists(self):
         """Populates all airfoil lists in the UI and enables viewer widgets."""
         # Clear existing lists first
@@ -149,7 +148,6 @@ class AirfoilViewer(QWidget):
                  self.viewer_series_combo.setEnabled(False)
                  self.viewer_source_edit.setEnabled(False)
                  self.update_info_button.setEnabled(False)
-
 
     def setup_start_tab(self):
         start_tab = QWidget()
@@ -306,8 +304,6 @@ class AirfoilViewer(QWidget):
             self.disable_other_tabs()
             self.populate_airfoil_lists() # Update lists (will be empty)
 
-    # Suggestion 4: Removed redundant load_airfoil_names method
-
     def browse_pointcloud(self):
         file_path, _ = QFileDialog.getOpenFileName(self, "Select Point Cloud File", "", "Text Files (*.txt);;All Files (*.*)")
         if file_path:
@@ -353,7 +349,6 @@ class AirfoilViewer(QWidget):
              QMessageBox.warning(self, "Add Airfoil", f"Airfoil name '{name}' already exists. Choose a different name or enable overwrite if applicable.")
         except Exception as e:
              QMessageBox.critical(self, "Add Airfoil Error", f"An error occurred: {e}")
-
 
     def setup_viewer_tab(self):
         viewer_tab = QWidget()
@@ -477,7 +472,6 @@ class AirfoilViewer(QWidget):
         except Exception as e:
              QMessageBox.critical(self, "Update Error", f"An error occurred while updating info: {e}")
 
-
     def plot_airfoil(self, item):
         if not self.airfoil_db_instance: return # Should not happen if list is populated
 
@@ -499,7 +493,6 @@ class AirfoilViewer(QWidget):
             self.ax.set_title("Plotting Error")
             self.canvas.draw()
             self.populate_info_edits(None) # Clear info fields
-
 
     def populate_info_edits(self, airfoil_name):
         """Populates the info edit fields AND geometry labels for the selected airfoil."""
@@ -566,7 +559,6 @@ class AirfoilViewer(QWidget):
         self.viewer_source_edit.clear()
         for label in self.geometry_labels.values():
             label.setText("N/A")
-
 
     def setup_geometry_search_tab(self):
         search_tab = QWidget()
@@ -648,8 +640,6 @@ class AirfoilViewer(QWidget):
         search_tab.setLayout(search_layout)
         self.tabs.addTab(search_tab, "Geometry Search")
 
-    # Suggestion 4: Removed redundant display_geometry_data method
-
     def search_airfoils(self):
         if not self.airfoil_db_instance:
             QMessageBox.warning(self, "Search Error", "Please open a database first.")
@@ -728,7 +718,6 @@ class AirfoilViewer(QWidget):
         # except Exception as e:
         #     QMessageBox.critical(self, "Search Error", f"An error occurred during search: {e}")
 
-
     def plot_selected_airfoils_search_tab(self):
         if not self.airfoil_db_instance: return
         selected_items = self.search_results_list.selectedItems()
@@ -765,7 +754,6 @@ class AirfoilViewer(QWidget):
         else:
             QMessageBox.information(self, "Plot Selected", "Please select one or more airfoils from the results list to plot.")
 
-
     def clear_search_criteria(self):
         for line_edit in self.search_params.values():
             line_edit.clear()
@@ -773,7 +761,6 @@ class AirfoilViewer(QWidget):
         if hasattr(self, 'geometry_tolerance_edit'):
              self.geometry_tolerance_edit.setText("0.1") # Reset default
              self.geometry_tolerance_type_combo.setCurrentIndex(0) # Reset default
-
 
     def clear_search_list(self):
         self.search_results_list.clear()
@@ -843,7 +830,6 @@ class AirfoilViewer(QWidget):
         self.compare_canvas.mpl_connect('button_press_event', self.on_compare_click)
         self.compare_pointcloud_points = None # Store the numpy array
         self.clear_compare_plot() # Initialize plot
-
 
     def browse_compare_pointcloud(self):
         file_path, _ = QFileDialog.getOpenFileName(self, "Select Point Cloud File", "", "Text Files (*.txt);;DAT Files (*.dat);;All Files (*.*)")
@@ -936,7 +922,6 @@ class AirfoilViewer(QWidget):
          self.compare_pointcloud_points = None # Clear loaded points
          self.compare_button.setEnabled(False) # Disable compare button
          self.compare_pointcloud_edit.clear() # Clear file path
-
 
     def on_compare_click(self, event):
         """Handles clicks on the compare plot for point editing."""
@@ -1092,7 +1077,6 @@ class AirfoilViewer(QWidget):
         else:
             QMessageBox.warning(self,"Database Error", "Database not loaded.")
 
-
     def plot_xfoil_results(self):
         """Plots the XFOIL results based on user selections."""
         if not self.airfoil_db_instance:
@@ -1139,11 +1123,11 @@ class AirfoilViewer(QWidget):
                  return
 
             # Prepare data for plotting (assuming data is sorted by alpha)
-            alpha_values = [row[4] for row in data] # Index 4: alpha
+            alpha_values = [row[5] for row in data] # Index 4: alpha
             coeff_data = {
-                "cl": [row[5] for row in data], # Index 5: cl
-                "cd": [row[6] for row in data], # Index 6: cd
-                "cm": [row[7] for row in data]  # Index 7: cm
+                "cl": [row[6] for row in data], # Index 5: cl
+                "cd": [row[7] for row in data], # Index 6: cd
+                "cm": [row[8] for row in data]  # Index 7: cm
             }
 
             for coeff in coefficients_to_plot:
@@ -1174,7 +1158,6 @@ class AirfoilViewer(QWidget):
             self.xfoil_ax.clear()
             self.xfoil_ax.set_title("Plotting Error")
             self.xfoil_canvas.draw()
-
 
     def setup_xfoil_results_search_tab(self):
         """Sets up the XFOIL results search tab."""
@@ -1315,7 +1298,6 @@ class AirfoilViewer(QWidget):
         except Exception as e:
              QMessageBox.critical(self, "Search Error", f"An error occurred during XFOIL results search: {e}")
 
-
     def clear_xfoil_search_criteria(self):
         """Clears the input fields for the XFOIL results search."""
         self.xfoil_parameter_combo.setCurrentIndex(0)
@@ -1369,10 +1351,6 @@ class AirfoilViewer(QWidget):
                  QMessageBox.warning(self, "Plot Error", "Could not plot any of the selected airfoils.")
         else:
             QMessageBox.information(self, "Plot Selected", "Please select one or more airfoils from the results list to plot.")
-
-    # Suggestion 2: Removed setup_xfoil_plot method
-    # Suggestion 2: Removed perform_xfoil_plot method
-
 
 class PointEditDialog(QDialog):
     """Simple dialog to edit X and Y coordinates."""

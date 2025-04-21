@@ -144,7 +144,7 @@ def parse_file_worker(filepath):
         airfoil_series = AirfoilSeries.identify_airfoil_series(airfoil_name)
         # Use name from file content as description? Or keep it simple?
         description = airfoil_name_from_file if airfoil_name_from_file else f"{base_name} Airfoil"
-        source_url = f"file://{filepath}" # Placeholder, ideally use original download URL if passed through
+        source_url = f"file://{filepath}" # Placeholder
 
         return {
             'name': base_name, # Use filename base as the primary key name
@@ -256,9 +256,9 @@ if __name__ == "__main__":
         start_url="https://m-selig.ae.illinois.edu/ads/coord_database.html",
         save_dir="airfoil_dat_files", # Directory for .dat files
         db_dir="airfoil_database",   # Directory for the SQLite DB
-        db_name="selig_airfoils.db", # Specific DB name
+        db_name="airfoils.db", # Specific DB name
         overwrite=True,              # Overwrite existing data in DB for this run
-        max_download_workers=20,     # Increase download concurrency
+        max_download_workers=30,     # Increase download concurrency
         max_parse_workers=None       # Use default (CPU count) for parsing
     )
     end_time = time.time()

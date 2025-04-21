@@ -102,6 +102,7 @@ def stat_analysis_on_airfoil_geom():
 if __name__ == "__main__":
     # plot_data()
     db = AirfoilDatabase(db_dir="my_airfoil_database")
+    db.update_airfoil_series()
     db.plot_airfoil_series_horizontal_bar(output_dir=output_folder, output_name='airfoil_series_horizontal_bar.png')
     #db.plot_airfoil('ag12')
     #data = db.get_airfoil_data('ag12')
@@ -121,6 +122,6 @@ if __name__ == "__main__":
     #db.plot_airfoil('fx63137', output_dir=output_folder)
     #plt.show()
     # print(data[0])
-    stat_analysis_on_airfoil_geom()
+    #stat_analysis_on_airfoil_geom()
     # print(data[1])
     #db.output_pointcloud_to_file('fx63137', r'D:\Mitchell\School\airfoils\fx63137\fx63137.txt')

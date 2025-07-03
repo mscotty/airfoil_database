@@ -268,6 +268,76 @@ def check_intersections(points, config):
         return True, "Intersection check failed (skipped)"
     return True, "No self-intersections"
 
+def check_point_distribution(points):
+    """
+    Analyzes the distribution of points along the airfoil to identify potential issues.
+    
+    Args:
+        points (np.ndarray): Nx2 array of airfoil coordinates
+        
+    Returns:
+        tuple: (is_well_distributed, dict of metrics)
+    """
+    if points is None or points.shape[0] < 10:
+        return False, {"reason": "Too few points for analysis"}
+    
+    # Find LE and TE
+    le_idx = np.argmin(points[:, 0])
+    te_idx = np.argmax(points[:, 0])
+    
+    # Count points on upper and lower surfaces
+    upper_count = 0
+    lower_count = 0
+    
+    # Reference line from LE to TE
+    chord_vector = points[te_idx] - points[le_idx]
+    
+    for i, point in enumerate(points):
+        if i == le_idx or i == te_idx:
+            continue
+            
+        point_vector = point - points[le_idx]
+        cross_product = np.cross(chord_vector, point_vector)
+        
+        if cross_product > 0:
+            upper_count += 1
+        else:
+            lower_count += 1
+    
+    # Calculate distribution metrics
+    total_points = points.shape[0]
+    upper_ratio = upper_count / total_points if total_points > 0 else 0
+    lower_ratio = lower_count / total_points if total_points > 0 else 0
+    
+    # Calculate point density around critical areas (LE and TE)
+    le_region_idx = np.argsort(np.linalg.norm(points - points[le_idx], axis=1))[:int(total_points*0.2)]
+    te_region_idx = np.argsort(np.linalg.norm(points - points[te_idx], axis=1))[:int(total_points*0.2)]
+    
+    le_density = len(le_region_idx) / total_points if total_points > 0 else 0
+    te_density = len(te_region_idx) / total_points if total_points > 0 else 0
+    
+    # Determine if well distributed
+    is_well_distributed = (
+        upper_count >= 10 and 
+        lower_count >= 10 and
+        0.3 <= upper_ratio <= 0.7 and
+        0.3 <= lower_ratio <= 0.7
+    )
+    
+    metrics = {
+        "total_points": total_points,
+        "upper_points": upper_count,
+        "lower_points": lower_count,
+        "upper_ratio": upper_ratio,
+        "lower_ratio": lower_ratio,
+        "le_density": le_density,
+        "te_density": te_density,
+        "is_well_distributed": is_well_distributed
+    }
+    
+    return is_well_distributed, metrics
+
+
 # --- Fixing Functions ---
 
 def normalize_airfoil(points):
@@ -293,24 +363,109 @@ def normalize_airfoil(points):
 
 
 def reorder_points(points):
-    """Attempts to reorder points to follow a standard airfoil path (TE->Upper->LE->Lower->TE)."""
-    # This is complex. A simple approach:
-    # 1. Find LE (min x) and TE (approx avg of first/last or points near x=1 after normalization).
-    # 2. Split points into upper/lower based on y-value relative to a line connecting LE/TE.
-    # 3. Sort upper surface points by decreasing x.
-    # 4. Sort lower surface points by increasing x.
-    # 5. Combine TE_lower -> Lower -> LE -> Upper -> TE_upper.
-    # This is a placeholder for a more robust algorithm.
-    logging.warning("Reordering logic is complex and placeholder used.")
-    # For now, just ensure LE is roughly at min x and TE near max x
-    min_x_idx = np.argmin(points[:, 0])
-    # Simple roll to put LE roughly in the middle if it's near start/end
-    if min_x_idx < 5 or min_x_idx > points.shape[0] - 5:
-         logging.debug("Attempting simple roll based on LE position.")
-         points = np.roll(points, shift=points.shape[0]//2 - min_x_idx, axis=0)
+    """
+    Reorders airfoil points to follow standard path: LE → upper surface → TE → lower surface → LE.
+    
+    Args:
+        points (np.ndarray): Nx2 array of airfoil coordinates
+        
+    Returns:
+        np.ndarray: Reordered points following the standard path
+    """
+    if points is None or points.shape[0] < 4:
+        logging.warning("Not enough points to reorder")
+        return points
+    
+    # Find the leading edge (min x-coordinate)
+    le_idx = np.argmin(points[:, 0])
+    le_point = points[le_idx]
+    
+    # Find the trailing edge (max x-coordinate)
+    te_idx = np.argmax(points[:, 0])
+    te_point = points[te_idx]
+    
+    # Create a reference line from LE to TE
+    chord_vector = te_point - le_point
+    chord_length = np.linalg.norm(chord_vector)
+    
+    if chord_length < 1e-6:
+        logging.warning("Chord length too small, cannot reorder")
+        return points
+    
+    # Split points into upper and lower surfaces
+    upper_points = []
+    lower_points = []
+    
+    for i, point in enumerate(points):
+        # Skip LE and TE points, we'll add them later
+        if i == le_idx or i == te_idx:
+            continue
+            
+        # Vector from LE to current point
+        point_vector = point - le_point
+        
+        # Calculate the signed distance from the chord line
+        # Using the cross product to determine which side of the line the point is on
+        cross_product = np.cross(chord_vector, point_vector)
+        
+        # Positive cross product = upper surface, negative = lower surface
+        if cross_product > 0:
+            upper_points.append(point)
+        else:
+            lower_points.append(point)
+    
+    # Convert to numpy arrays
+    upper_points = np.array(upper_points) if upper_points else np.empty((0, 2))
+    lower_points = np.array(lower_points) if lower_points else np.empty((0, 2))
+    
+    # Sort upper surface points by increasing x-coordinate
+    if len(upper_points) > 0:
+        upper_indices = np.argsort(upper_points[:, 0])
+        upper_points = upper_points[upper_indices]
+    
+    # Sort lower surface points by decreasing x-coordinate
+    if len(lower_points) > 0:
+        lower_indices = np.argsort(-lower_points[:, 0])
+        lower_points = lower_points[lower_indices]
+    
+    # Assemble the reordered points: LE → upper → TE → lower → LE
+    reordered_points = []
+    reordered_points.append(le_point)
+    
+    if len(upper_points) > 0:
+        reordered_points.extend(upper_points)
+    
+    reordered_points.append(te_point)
+    
+    if len(lower_points) > 0:
+        reordered_points.extend(lower_points)
+    
+    # Add LE again to close the loop
+    reordered_points.append(le_point)
+    
+    return np.array(reordered_points)
 
-    return points # Return potentially rolled points
-
+def remove_duplicate_points(points, min_distance=1e-6):
+    """
+    Removes duplicate or extremely close points from the point cloud.
+    
+    Args:
+        points (np.ndarray): Nx2 array of points
+        min_distance (float): Minimum distance between points
+        
+    Returns:
+        np.ndarray: Points with duplicates removed
+    """
+    if points is None or points.shape[0] < 2:
+        return points
+        
+    result = [points[0]]
+    
+    for i in range(1, len(points)):
+        if np.linalg.norm(points[i] - result[-1]) >= min_distance:
+            result.append(points[i])
+    
+    return np.array(result)
 
 def close_te_gap(points, config):
     """Closes the trailing edge gap by averaging or projecting."""
@@ -386,16 +541,13 @@ def fix_pointcloud(points_array, config=None):
         return None # Cannot proceed
 
     # 2. Normalization (Optional but recommended for consistent checks)
-    # Decide if you want to store normalized or original scale points.
-    # Storing normalized is often better for comparisons.
     original_points = current_points.copy() # Keep original if needed later
     current_points = normalize_airfoil(current_points)
     logging.debug("Normalized airfoil (LE=0,0, Chord=1).")
 
-    # 3. Reordering (Attempt if needed - complex)
-    # Add a check_order function here if possible
-    # For now, we apply the simple roll attempt
+    # 3. Reordering - Apply improved reordering algorithm
     current_points = reorder_points(current_points)
+    logging.debug("Reordered points to follow standard airfoil path.")
 
     # 4. TE Closure Check & Fix
     is_closed, reason = check_te_closure(current_points, config)
@@ -405,41 +557,49 @@ def fix_pointcloud(points_array, config=None):
         # Recheck after fixing
         is_closed, _ = check_te_closure(current_points, config)
         if not is_closed:
-             logging.error("Fixing failed: Could not close TE gap.")
-             # Decide whether to return original or None
-             return None # Or return original_points if preferred
+            logging.error("Fixing failed: Could not close TE gap.")
+            return None
 
     # 5. Intersection Check
     is_simple, reason = check_intersections(current_points, config)
     if not is_simple:
         logging.error(f"Fixing failed: {reason} detected.")
-        # Attempting to fix intersections automatically is very difficult.
-        # Usually best to flag or return None/original.
-        return None # Or return original_points
+        return None
 
     # 6. Point Spacing Check & Interpolation (Fix)
-    needs_interp, reason = check_point_spacing(current_points, config)
-    if not needs_interp: # Note: check returns True if spacing is OK
+    has_good_spacing, reason = check_point_spacing(current_points, config)
+    if not has_good_spacing:
         logging.warning(f"Point spacing issue detected: {reason}. Attempting interpolation.")
         current_points = interpolate_points(current_points, config["interpolation_points"])
-        # Optional: Re-run checks after interpolation if needed
+        
+        # Recheck spacing after interpolation
+        has_good_spacing, reason = check_point_spacing(current_points, config)
+        if not has_good_spacing:
+            logging.warning(f"Point spacing still problematic after interpolation: {reason}")
+            # Continue anyway as this might not be critical
 
-    # 7. Final Checks (Optional)
-    # Run checks again to ensure fixes didn't introduce new problems
+    # 7. Final Checks
     is_valid, reason = check_basic_validity(current_points, config)
-    if not is_valid: return None # Failed after fixing
+    if not is_valid:
+        logging.error(f"Final check failed: {reason}")
+        return None
+        
     is_closed, _ = check_te_closure(current_points, config)
-    if not is_closed: return None # Failed after fixing
+    if not is_closed:
+        logging.error("Final check failed: TE not closed")
+        return None
+        
     is_simple, _ = check_intersections(current_points, config)
-    if not is_simple: return None # Failed after fixing
+    if not is_simple:
+        logging.error("Final check failed: Self-intersections detected")
+        return None
 
-    logging.info("Point cloud fixing process completed.")
-    # Decide whether to return normalized or rescale to original size
-    # Returning normalized points here:
+    # 8. Ensure the first and last points are identical to guarantee closure
+    if not np.allclose(current_points[0], current_points[-1]):
+        current_points = np.vstack([current_points, current_points[0]])
+
+    logging.info("Point cloud fixing process completed successfully.")
     return current_points
 
-    # To return rescaled (more complex):
-    # 1. Need to store original LE position and chord scale from normalize_airfoil
-    # 2. Apply inverse scaling and translation here before returning
 
 

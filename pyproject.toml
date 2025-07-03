@@ -14,6 +14,7 @@ classifiers = [
 
 dependencies = [
     "numpy",
+    "matplotlib",
     "ambiance",
     "pandas",
     "scipy",
@@ -26,7 +27,10 @@ dependencies = [
     "shapely",
     "PyQt6",
     "statsmodels",
-    "scikit-learn"
+    "scikit-learn",
+    "requests",
+    "bs4",
+    "sqlmodel"
 ]
 
 [project.optional-dependencies]

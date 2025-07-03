@@ -1,6 +1,8 @@
 .env
+.venv
 __pycache__
 *\__pycache__
 src7airfoil_database.egg-info/*
 airfoil_dat_files/
 airfoil_database/
+my_airfoil_database/

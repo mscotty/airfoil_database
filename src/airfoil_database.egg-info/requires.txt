@@ -1,4 +1,5 @@
 numpy
+matplotlib
 ambiance
 pandas
 scipy
@@ -12,6 +13,8 @@ shapely
 PyQt6
 statsmodels
 scikit-learn
+requests
+bs4
 
 [dev]
 pytest

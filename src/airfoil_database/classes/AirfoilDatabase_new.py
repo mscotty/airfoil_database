@@ -1,5 +1,4 @@
 import os
-import sqlite3
 import csv
 import json
 import matplotlib.pyplot as plt
@@ -12,6 +11,8 @@ from scipy.spatial import ConvexHull
 from shapely.geometry import Polygon
 import pandas as pd
 import logging
+from typing import List, Optional, Dict, Any, Tuple
+from sqlmodel import Field, Session, SQLModel, create_engine, select, Column, JSON, String, Float
 
 from airfoil_database.plotting.plot_histogram import plot_histogram
 from airfoil_database.plotting.plot_bar_chart import plot_horizontal_bar_chart
@@ -33,98 +34,104 @@ from airfoil_database.classes.AirfoilSeries import AirfoilSeries
 
 from airfoil_database.utilities.get_files_starting_with import get_files_starting_with
 
+
+# Define SQLModel models
+class Airfoil(SQLModel, table=True):
+    __tablename__ = "airfoils"
+    
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str = Field(index=True, unique=True)
+    description: Optional[str] = None
+    pointcloud: Optional[str] = None
+    airfoil_series: Optional[str] = None
+    source: Optional[str] = None
+
+
+class AeroCoeff(SQLModel, table=True):
+    __tablename__ = "aero_coeffs"
+    
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str = Field(index=True, foreign_key="airfoils.name")
+    reynolds_number: float
+    mach: float
+    ncrit: float
+    alpha: float
+    cl: Optional[float] = None
+    cd: Optional[float] = None
+    cm: Optional[float] = None
+    
+    class Config:
+        unique_together = [("name", "reynolds_number", "mach", "alpha")]
+
+
+class AirfoilGeometry(SQLModel, table=True):
+    __tablename__ = "airfoil_geometry"
+    
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str = Field(index=True, unique=True, foreign_key="airfoils.name")
+    max_thickness: Optional[float] = None
+    max_camber: Optional[float] = None
+    chord_length: Optional[float] = None
+    aspect_ratio: Optional[float] = None
+    leading_edge_radius: Optional[float] = None
+    trailing_edge_angle: Optional[float] = None
+    thickness_to_chord_ratio: Optional[float] = None
+    thickness_distribution: Optional[str] = None
+    camber_distribution: Optional[str] = None
+    normalized_chord: Optional[str] = None
+
+
 class AirfoilDatabase:
     def __init__(self, db_name="airfoil_data.db", db_dir="."):
-        self.db_path = os.path.join(db_dir, db_name) # Path to the database
-        os.makedirs(db_dir, exist_ok=True) # Create directory if it doesn't exist.
-        # self.write_lock = threading.Lock() # Potentially problematic with multiprocessing
-        self._enable_wal()
-        self._create_table()
+        self.db_path = os.path.join(db_dir, db_name)  # Path to the database
+        os.makedirs(db_dir, exist_ok=True)  # Create directory if it doesn't exist.
+        
+        # Create SQLAlchemy engine
+        self.engine = create_engine(f"sqlite:///{self.db_path}", echo=False)
+        
+        # Create tables if they don't exist
+        SQLModel.metadata.create_all(self.engine)
+        
         logging.info(f"AirfoilDatabase initialized with db: {self.db_path}")
 
-    def _enable_wal(self):
-        try:
-            with sqlite3.connect(self.db_path) as conn:
-                conn.execute("PRAGMA journal_mode=WAL;")
-                logging.info("SQLite WAL mode enabled.")
-        except sqlite3.Error as e:
-            logging.error(f"Failed to enable WAL mode for {self.db_path}: {e}")
-
-    def _create_table(self):
-        # Add error handling
-        try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
-                # Airfoils table
-                cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS airfoils (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        name TEXT UNIQUE NOT NULL,
-                        description TEXT,
-                        pointcloud TEXT,
-                        airfoil_series TEXT,
-                        source TEXT
-                    )
-                """)
-                # Aero Coefficients table
-                cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS aero_coeffs (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        name TEXT NOT NULL,
-                        reynolds_number REAL NOT NULL,
-                        mach REAL NOT NULL,
-                        ncrit REAL NOT NULL,
-                        alpha REAL NOT NULL,
-                        cl REAL,
-                        cd REAL,
-                        cm REAL,
-                        FOREIGN KEY (name) REFERENCES airfoils(name),
-                        UNIQUE (name, reynolds_number, mach, alpha)
-                    )
-                """)
-                # Geometry table
-                cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS airfoil_geometry (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        name TEXT UNIQUE NOT NULL,
-                        max_thickness REAL,
-                        max_camber REAL,
-                        chord_length REAL,
-                        aspect_ratio REAL,
-                        leading_edge_radius REAL,
-                        trailing_edge_angle REAL,
-                        thickness_to_chord_ratio REAL,
-                        thickness_distribution TEXT,
-                        camber_distribution TEXT,
-                        normalized_chord TEXT,
-                        FOREIGN KEY (name) REFERENCES airfoils(name)
-                    )
-                """)
-                conn.commit()
-                logging.info("Database tables ensured.")
-        except sqlite3.Error as e:
-            logging.error(f"Failed to create/verify database tables: {e}")
-            raise # Re-raise critical error
-        
     def store_airfoil_data(self, name, description, pointcloud, airfoil_series, source, overwrite=False):
         try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
-                if overwrite:
-                    cursor.execute("REPLACE INTO airfoils (name, description, pointcloud, airfoil_series, source) VALUES (?, ?, ?, ?, ?)", (name, description, pointcloud, airfoil_series.value, source))
+            with Session(self.engine) as session:
+                # Check if airfoil exists
+                statement = select(Airfoil).where(Airfoil.name == name)
+                existing_airfoil = session.exec(statement).first()
+                
+                if existing_airfoil and not overwrite:
+                    print(f"Airfoil {name} already exists in the database. Use overwrite=True to update.")
+                    return
+                
+                if existing_airfoil and overwrite:
+                    # Update existing airfoil
+                    existing_airfoil.description = description
+                    existing_airfoil.pointcloud = pointcloud
+                    existing_airfoil.airfoil_series = airfoil_series.value
+                    existing_airfoil.source = source
+                    session.add(existing_airfoil)
+                    session.commit()
+                    print(f"Updated: {name} in database.")
                 else:
-                    cursor.execute("INSERT INTO airfoils (name, description, pointcloud, airfoil_series, source) VALUES (?, ?, ?, ?, ?)", (name, description, pointcloud, airfoil_series.value, source))
-                conn.commit()
-                print(f"Stored: {name} in database.")
-        except sqlite3.IntegrityError:
-            if overwrite:
-                print(f"Updated: {name} in database.")
-            else:
-                print(f"Airfoil {name} already exists in the database. Use overwrite=True to update.")
+                    # Create new airfoil
+                    airfoil = Airfoil(
+                        name=name,
+                        description=description,
+                        pointcloud=pointcloud,
+                        airfoil_series=airfoil_series.value,
+                        source=source
+                    )
+                    session.add(airfoil)
+                    session.commit()
+                    print(f"Stored: {name} in database.")
+        except Exception as e:
+            print(f"Error storing airfoil data: {e}")
     
     def store_bulk_airfoil_data(self, data_list, overwrite=False):
         """
-        Stores multiple airfoil data records in the database using executemany.
+        Stores multiple airfoil data records in the database.
 
         Args:
             data_list (list): A list of dictionaries. Each dictionary should contain
@@ -141,71 +148,65 @@ class AirfoilDatabase:
             logging.info("No data provided for bulk storage.")
             return 0
 
-        rows_to_insert = []
-        names_to_check = {data['name'] for data in data_list if 'name' in data} # Get unique names from input
-
         inserted_count = 0
+        names_to_check = {data['name'] for data in data_list if 'name' in data}  # Get unique names from input
 
         try:
-            with sqlite3.connect(self.db_path, timeout=10.0) as conn:
-                cursor = conn.cursor()
-
+            with Session(self.engine) as session:
                 if not overwrite:
                     # Find names that already exist if we are not overwriting
-                    placeholders = ','.join('?' * len(names_to_check))
-                    query = f"SELECT name FROM airfoils WHERE name IN ({placeholders})"
-                    cursor.execute(query, list(names_to_check))
-                    existing_names = {row[0] for row in cursor.fetchall()}
+                    statement = select(Airfoil.name).where(Airfoil.name.in_(names_to_check))
+                    existing_names = {row.name for row in session.exec(statement)}
                     logging.info(f"Found {len(existing_names)} existing airfoils matching input names. Skipping them.")
                 else:
-                    existing_names = set() # Overwrite mode, don't skip any
+                    existing_names = set()  # Overwrite mode, don't skip any
 
-                # Prepare data tuples for executemany
+                airfoils_to_add = []
+                
                 for data in data_list:
                     name = data.get('name')
                     if not name:
                         logging.warning("Skipping record due to missing 'name'.")
                         continue
-                    if name in existing_names:
-                        continue # Skip if not overwriting and name exists
+                    
+                    if name in existing_names and not overwrite:
+                        continue  # Skip if not overwriting and name exists
 
-                    # Ensure all required fields are present, provide defaults if necessary
-                    desc = data.get('description', '')
-                    pc_str = data.get('pointcloud', '')
-                    series = data.get('airfoil_series', 'UNKNOWN') # Use default/enum value
-                    source = data.get('source', '')
-                    # Add filepath if you add that column: filepath = data.get('filepath', '')
+                    # Check if airfoil exists for overwrite
+                    if overwrite:
+                        statement = select(Airfoil).where(Airfoil.name == name)
+                        existing_airfoil = session.exec(statement).first()
+                        
+                        if existing_airfoil:
+                            # Update existing airfoil
+                            existing_airfoil.description = data.get('description', '')
+                            existing_airfoil.pointcloud = data.get('pointcloud', '')
+                            existing_airfoil.airfoil_series = data.get('airfoil_series', 'UNKNOWN')
+                            existing_airfoil.source = data.get('source', '')
+                            session.add(existing_airfoil)
+                            inserted_count += 1
+                            continue
 
-                    # Order must match the INSERT statement columns
-                    rows_to_insert.append((name, desc, pc_str, series, source)) # Add filepath here if needed
+                    # Create new airfoil
+                    airfoil = Airfoil(
+                        name=name,
+                        description=data.get('description', ''),
+                        pointcloud=data.get('pointcloud', ''),
+                        airfoil_series=data.get('airfoil_series', 'UNKNOWN'),
+                        source=data.get('source', '')
+                    )
+                    airfoils_to_add.append(airfoil)
+                    inserted_count += 1
 
-                if not rows_to_insert:
-                     logging.info("No new data to insert after filtering existing names.")
-                     return 0
+                if airfoils_to_add:
+                    session.add_all(airfoils_to_add)
+                    session.commit()
+                
+                logging.info(f"Bulk insert/replace finished. Affected rows: {inserted_count}")
+                return inserted_count
 
-                # Use INSERT OR REPLACE if overwrite is True, otherwise INSERT OR IGNORE
-                sql = """
-                    INSERT OR {action} INTO airfoils (name, description, pointcloud, airfoil_series, source)
-                    VALUES (?, ?, ?, ?, ?)
-                """.format(action="REPLACE" if overwrite else "IGNORE")
-
-                cursor.executemany(sql, rows_to_insert)
-                conn.commit()
-                inserted_count = cursor.rowcount # executemany returns -1 usually, check changes
-                # Getting accurate count after executemany can be tricky, check changes instead
-                changes = conn.total_changes
-                # This counts total changes since connection, might need refinement if connection is reused
-                # A more reliable way might be len(rows_to_insert) if using INSERT OR IGNORE/REPLACE
-                logging.info(f"Bulk insert/replace finished. Affected rows (approx): {len(rows_to_insert)}")
-                # Return the number intended for insertion, actual count might differ slightly
-                # depending on IGNORE/REPLACE behavior and concurrent access.
-                return len(rows_to_insert)
-
-        except sqlite3.Error as e:
-            logging.error(f"SQLite error during bulk insert: {e}", exc_info=True)
-            return 0 # Indicate failure/no insertion
         except Exception as e:
-            logging.error(f"Unexpected error during bulk insert: {e}", exc_info=True)
+            logging.error(f"Error during bulk insert: {e}", exc_info=True)
             return 0
 
     def add_airfoils_from_csv(self, csv_file, overwrite=False):
@@ -218,35 +219,36 @@ class AirfoilDatabase:
                     print("CSV file is empty or has no headers.")
                     return
 
-                with sqlite3.connect(self.db_path) as conn:
-                    cursor = conn.cursor()
+                with Session(self.engine) as session:
                     for row in reader:
                         name = row.get('name')  # Assuming 'name' column exists
                         if not name:
                             print("Warning: Skipping row with missing 'name'.")
                             continue
-                        if overwrite:
-                            self._delete_airfoil_data(name, conn, cursor)
-
-                        insert_query = "INSERT OR REPLACE INTO airfoils ("
-                        values_query = "VALUES ("
-                        values = []
-
+                        
+                        # Check if airfoil exists
+                        statement = select(Airfoil).where(Airfoil.name == name)
+                        existing_airfoil = session.exec(statement).first()
+                        
+                        if existing_airfoil and overwrite:
+                            # Delete existing airfoil data if overwrite is True
+                            self._delete_airfoil_data(name, session)
+                        
+                        # Create airfoil data dictionary from valid columns
+                        airfoil_data = {}
                         for header in headers:
                             if header in ['name', 'description', 'pointcloud', 'airfoil_series', 'source']:
-                                insert_query += f"{header}, "
-                                values_query += "?, "
-                                values.append(row.get(header))
-
-                        insert_query = insert_query.rstrip(', ') + ") "
-                        values_query = values_query.rstrip(', ') + ")"
-                        query = insert_query + values_query
-
+                                airfoil_data[header] = row.get(header)
+                        
+                        # Create and add airfoil
+                        airfoil = Airfoil(**airfoil_data)
+                        session.add(airfoil)
+                        
                         try:
-                            cursor.execute(query, values)
-                            conn.commit()
+                            session.commit()
                             print(f"Added/Updated: {name} from CSV.")
-                        except sqlite3.IntegrityError as e:
+                        except Exception as e:
+                            session.rollback()
                             print(f"Error adding {name}: {e}")
 
         except FileNotFoundError:
@@ -260,17 +262,31 @@ class AirfoilDatabase:
             with open(json_file, 'r', encoding='utf-8') as file:
                 data = json.load(file)
 
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
+            with Session(self.engine) as session:
                 for name, airfoil_data in data.items():
-                    if overwrite:
-                        self._delete_airfoil_data(name, conn, cursor)
+                    # Check if airfoil exists
+                    statement = select(Airfoil).where(Airfoil.name == name)
+                    existing_airfoil = session.exec(statement).first()
+                    
+                    if existing_airfoil and overwrite:
+                        # Delete existing airfoil data if overwrite is True
+                        self._delete_airfoil_data(name, session)
+                    
+                    # Create airfoil
+                    airfoil = Airfoil(
+                        name=name,
+                        description=airfoil_data.get('description'),
+                        pointcloud=airfoil_data.get('pointcloud'),
+                        airfoil_series=airfoil_data.get('airfoil_series'),
+                        source=airfoil_data.get('source')
+                    )
+                    session.add(airfoil)
+                    
                     try:
-                        insert_query = "INSERT OR REPLACE INTO airfoils (name, description, pointcloud, airfoil_series, source) VALUES (?, ?, ?, ?, ?)"
-                        cursor.execute(insert_query, (name, airfoil_data.get('description'), airfoil_data.get('pointcloud'), airfoil_data.get('airfoil_series'), airfoil_data.get('source')))
-                        conn.commit()
+                        session.commit()
                         print(f"Added/Updated: {name} from JSON.")
-                    except sqlite3.IntegrityError as e:
+                    except Exception as e:
+                        session.rollback()
                         print(f"Error adding {name}: {e}")
 
         except FileNotFoundError:
@@ -283,88 +299,102 @@ class AirfoilDatabase:
     def update_airfoil_info(self, old_name, new_name, description, series, source):
         """Updates airfoil info in all related tables."""
         try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
+            with Session(self.engine) as session:
+                # Update airfoil
+                statement = select(Airfoil).where(Airfoil.name == old_name)
+                airfoil = session.exec(statement).first()
+                
+                if airfoil:
+                    # Update airfoil fields
+                    airfoil.name = new_name
+                    airfoil.description = description
+                    airfoil.airfoil_series = series
+                    airfoil.source = source
+                    
+                    # Update aero_coeffs
+                    statement = select(AeroCoeff).where(AeroCoeff.name == old_name)
+                    aero_coeffs = session.exec(statement).all()
+                    for coeff in aero_coeffs:
+                        coeff.name = new_name
+                    
+                    # Update airfoil_geometry
+                    statement = select(AirfoilGeometry).where(AirfoilGeometry.name == old_name)
+                    geometry = session.exec(statement).first()
+                    if geometry:
+                        geometry.name = new_name
+                    
+                    session.commit()
+                    print(f"Updated airfoil info for {old_name} to {new_name}.")
+                else:
+                    print(f"Airfoil {old_name} not found.")
 
-                # Update airfoils table
-                cursor.execute("""
-                    UPDATE airfoils
-                    SET name = ?, description = ?, airfoil_series = ?, source = ?
-                    WHERE name = ?
-                """, (new_name, description, series, source, old_name))
-
-                # Update aero_coeffs table
-                cursor.execute("""
-                    UPDATE aero_coeffs
-                    SET name = ?
-                    WHERE name = ?
-                """, (new_name, old_name))
-
-                # Update airfoil_geometry table
-                cursor.execute("""
-                    UPDATE airfoil_geometry
-                    SET name = ?
-                    WHERE name = ?
-                """, (new_name, old_name))
-
-                conn.commit()
-                print(f"Updated airfoil info for {old_name} to {new_name}.")
-
-        except sqlite3.Error as e:
+        except Exception as e:
             print(f"Error updating airfoil info: {e}")
 
     def update_airfoil_series(self):
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT name, description, airfoil_series FROM airfoils")
-            airfoils = cursor.fetchall()
-            for name, description, airfoil_series in airfoils:
-                airfoil_series_curr = AirfoilSeries.from_string(airfoil_series)
+        with Session(self.engine) as session:
+            statement = select(Airfoil)
+            airfoils = session.exec(statement).all()
+            
+            for airfoil in airfoils:
+                airfoil_series_curr = AirfoilSeries.from_string(airfoil.airfoil_series)
                 if airfoil_series_curr == AirfoilSeries.OTHER:
-                    airfoil_series_curr = AirfoilSeries.identify_airfoil_series(name)
+                    airfoil_series_curr = AirfoilSeries.identify_airfoil_series(airfoil.name)
                     if airfoil_series_curr == AirfoilSeries.OTHER:
-                        airfoil_series_curr = AirfoilSeries.identify_airfoil_series(description)
+                        airfoil_series_curr = AirfoilSeries.identify_airfoil_series(airfoil.description or '')
                         #TODO: Add more logic to get the airfoil series
-                    cursor.execute("UPDATE airfoils SET airfoil_series = ? WHERE name = ?", (airfoil_series_curr.value, name))
-                    conn.commit()
+                    airfoil.airfoil_series = airfoil_series_curr.value
+            
+            session.commit()
 
-    def _delete_airfoil_data(self, name, conn, cursor):
+    def _delete_airfoil_data(self, name, session):
         """Deletes all data associated with an airfoil."""
-        cursor.execute("DELETE FROM airfoils WHERE name = ?", (name,))
-        cursor.execute("DELETE FROM aero_coeffs WHERE name = ?", (name,))
-        cursor.execute("DELETE FROM airfoil_geometry WHERE name = ?", (name,))
-        conn.commit()
+        # Delete from aero_coeffs
+        statement = select(AeroCoeff).where(AeroCoeff.name == name)
+        aero_coeffs = session.exec(statement).all()
+        for coeff in aero_coeffs:
+            session.delete(coeff)
+        
+        # Delete from airfoil_geometry
+        statement = select(AirfoilGeometry).where(AirfoilGeometry.name == name)
+        geometry = session.exec(statement).first()
+        if geometry:
+            session.delete(geometry)
+        
+        # Delete from airfoils
+        statement = select(Airfoil).where(Airfoil.name == name)
+        airfoil = session.exec(statement).first()
+        if airfoil:
+            session.delete(airfoil)
+        
+        session.commit()
         print(f"Deleted existing data for {name}.")
 
     def get_airfoil_data(self, name):
         """Retrieves airfoil data including description, pointcloud, series, and source."""
         try:
-            with sqlite3.connect(self.db_path) as conn:
-                # Set row factory for dictionary access if preferred, otherwise tuple is fine
-                # conn.row_factory = sqlite3.Row
-                cursor = conn.cursor()
-                cursor.execute("SELECT description, pointcloud, airfoil_series, source FROM airfoils WHERE name = ?", (name,))
-                result = cursor.fetchone()
-                if result:
+            with Session(self.engine) as session:
+                statement = select(Airfoil).where(Airfoil.name == name)
+                airfoil = session.exec(statement).first()
+                
+                if airfoil:
                     logging.debug(f"Retrieved data for airfoil: {name}")
-                    return result # Returns tuple: (description, pointcloud, series, source)
+                    return (airfoil.description, airfoil.pointcloud, airfoil.airfoil_series, airfoil.source)
                 else:
                     logging.warning(f"Airfoil '{name}' not found in database.")
                     return None
-        except sqlite3.Error as e:
+        except Exception as e:
             logging.error(f"Error retrieving airfoil data for {name}: {e}")
             return None
     
     def get_airfoil_dataframe(self):
         """Returns a Pandas DataFrame with airfoil names, series, and number of points."""
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT name, airfoil_series, pointcloud FROM airfoils")
-            results = cursor.fetchall()
+        with Session(self.engine) as session:
+            statement = select(Airfoil.name, Airfoil.airfoil_series, Airfoil.pointcloud)
+            results = session.exec(statement).all()
 
         data = []
-        for row in results:
-            name, series, pointcloud = row
+        for name, series, pointcloud in results:
             num_points = len(pointcloud.strip().split('\n')) if pointcloud else 0
             data.append({
                 'Name': name,
@@ -377,30 +407,34 @@ class AirfoilDatabase:
     def get_airfoil_geometry_dataframe(self):
         """Retrieves airfoil geometry data from the database and returns it as a Pandas DataFrame."""
         try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
-                cursor.execute("""
-                    SELECT 
-                        id, name, max_thickness, max_camber, chord_length,  
-                        aspect_ratio, leading_edge_radius, trailing_edge_angle, 
-                        thickness_to_chord_ratio 
-                    FROM airfoil_geometry
-                """)
-                results = cursor.fetchall()
+            with Session(self.engine) as session:
+                statement = select(AirfoilGeometry)
+                results = session.exec(statement).all()
+                
+                if not results:
+                    return pd.DataFrame()  # Return an empty DataFrame if no data found
+                
+                # Convert SQLModel objects to dictionaries
+                data = [
+                    {
+                        "id": geom.id,
+                        "name": geom.name,
+                        "max_thickness": geom.max_thickness,
+                        "max_camber": geom.max_camber,
+                        "chord_length": geom.chord_length,
+                        "aspect_ratio": geom.aspect_ratio,
+                        "leading_edge_radius": geom.leading_edge_radius,
+                        "trailing_edge_angle": geom.trailing_edge_angle,
+                        "thickness_to_chord_ratio": geom.thickness_to_chord_ratio
+                    }
+                    for geom in results
+                ]
+                
+                return pd.DataFrame(data)
 
-            if not results:
-                return pd.DataFrame()  # Return an empty DataFrame if no data found
-
-            column_names = [description[0] for description in cursor.description]
-            df = pd.DataFrame(results, columns=column_names)
-            return df
-
-        except sqlite3.Error as e:
-            print(f"SQLite error: {e}")
-            return pd.DataFrame() #Return empty dataframe on error.
         except Exception as e:
             print(f"An error occurred: {e}")
-            return pd.DataFrame() #Return empty dataframe on error.
+            return pd.DataFrame()  # Return empty dataframe on error.
     
     def _pointcloud_to_numpy(self, pointcloud_str):
         """Converts a pointcloud string to a NumPy array."""
@@ -415,13 +449,12 @@ class AirfoilDatabase:
     
     def check_pointcloud_outliers(self, name, threshold=3.0):
         """Checks for outliers in the pointcloud of a given airfoil."""
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT pointcloud FROM airfoils WHERE name = ?", (name,))
-            result = cursor.fetchone()
+        with Session(self.engine) as session:
+            statement = select(Airfoil.pointcloud).where(Airfoil.name == name)
+            result = session.exec(statement).first()
 
-            if result and result[0]:
-                pointcloud_np = self._pointcloud_to_numpy(result[0])
+            if result:
+                pointcloud_np = self._pointcloud_to_numpy(result)
                 if pointcloud_np.size == 0:
                     return False, "Empty pointcloud"
                 x = pointcloud_np[:, 0]
@@ -446,13 +479,11 @@ class AirfoilDatabase:
         """Checks all airfoils in the database for outliers."""
         outliers_found = {}
 
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT name FROM airfoils")
-            airfoils = cursor.fetchall()
+        with Session(self.engine) as session:
+            statement = select(Airfoil.name)
+            airfoils = session.exec(statement).all()
 
-            for airfoil in airfoils:
-                name = airfoil[0]
+            for name in airfoils:
                 has_outliers, outliers = self.check_pointcloud_outliers(name, threshold)
                 if has_outliers:
                     outliers_found[name] = outliers
@@ -478,13 +509,13 @@ class AirfoilDatabase:
         logging.info("Starting pointcloud fixing process for all airfoils.")
         airfoil_names = []
         try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
+            with Session(self.engine) as session:
                 # Select names of airfoils that have some pointcloud data
-                cursor.execute("SELECT name FROM airfoils WHERE pointcloud IS NOT NULL AND pointcloud != '' ORDER BY name")
-                results = cursor.fetchall()
-                airfoil_names = [row[0] for row in results]
-        except sqlite3.Error as e:
+                statement = select(Airfoil.name).where(
+                    (Airfoil.pointcloud != None) & (Airfoil.pointcloud != "")
+                ).order_by(Airfoil.name)
+                airfoil_names = session.exec(statement).all()
+        except Exception as e:
             logging.error(f"Failed to retrieve airfoil names for fixing: {e}")
             return
 
@@ -524,7 +555,7 @@ class AirfoilDatabase:
         """
         logging.info(f"Attempting to fix pointcloud for airfoil: {name}")
         airfoil_data = self.get_airfoil_data(name)
-        if not airfoil_data or not airfoil_data[1]: # Check data exists and pointcloud string is not empty
+        if not airfoil_data or not airfoil_data[1]:  # Check data exists and pointcloud string is not empty
             logging.error(f"Cannot fix: Airfoil '{name}' not found or has no pointcloud data.")
             return None
 
@@ -536,7 +567,7 @@ class AirfoilDatabase:
         points_array = parse_pointcloud_string(pointcloud_str)
         if points_array is None:
             logging.error(f"Could not parse original pointcloud string for {name}.")
-            return None # Parsing failed
+            return None  # Parsing failed
 
         # Get the fixer configuration
         fixer_config = config if config is not None else DEFAULT_FIXER_CONFIG
@@ -553,9 +584,9 @@ class AirfoilDatabase:
                 # Format the fixed array back to string with desired precision
                 fixed_pointcloud_str = format_pointcloud_array(fixed_points_array, fixer_config.get("precision", 10))
                 # Store the updated data
-                self.store_airfoil_data(name, description, fixed_pointcloud_str, airfoil_series, source)
+                self.store_airfoil_data(name, description, fixed_pointcloud_str, airfoil_series, source, overwrite=True)
                 logging.info(f"Stored fixed pointcloud for {name} in database.")
-            return fixed_points_array # Return the fixed array
+            return fixed_points_array  # Return the fixed array
 
     def output_pointcloud_to_file(self, airfoil_name, file_path):
         """
@@ -566,29 +597,27 @@ class AirfoilDatabase:
             file_path (str): The path to the output text file.
         """
         try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
-                cursor.execute("SELECT pointcloud FROM airfoils WHERE name = ?", (airfoil_name,))
-                result = cursor.fetchone()
+            with Session(self.engine) as session:
+                statement = select(Airfoil.pointcloud).where(Airfoil.name == airfoil_name)
+                result = session.exec(statement).first()
 
-                if result and result[0]:
-                    pointcloud_str = result[0]
+                if result:
+                    pointcloud_str = result
                     with open(file_path, 'w') as file:
                         file.write(pointcloud_str)
                 else:
                     print(f"Airfoil '{airfoil_name}' not found or point cloud is empty.")
 
-        except sqlite3.Error as e:
+        except Exception as e:
             print(f"Error outputting point cloud: {e}")
 
     def plot_airfoil_series_pie(self, output_dir=None, output_name=None):
         """Fetches airfoil series data from the database and plots a pie chart."""
 
         # Connect to database and retrieve all airfoil_series values
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT airfoil_series FROM airfoils")
-            series_list = [row[0] for row in cursor.fetchall() if row[0]]
+        with Session(self.engine) as session:
+            statement = select(Airfoil.airfoil_series)
+            series_list = [row for row in session.exec(statement) if row]
 
         if not series_list:
             print("No airfoil series data found in the database.")
@@ -610,16 +639,15 @@ class AirfoilDatabase:
         if output_dir is not None or output_name is not None:
             plt.savefig(os.path.join(output_dir if output_dir is not None else '', output_name if output_name is not None else 'airfoil_series_pie.png'))
         else:
-            plt.show() # Display the pie chart
+            plt.show()  # Display the pie chart
     
     def plot_airfoil_series_horizontal_bar(self, **kwargs):
         """Fetches airfoil series data from the database and plots a horizontal bar chart."""
 
         # Connect to database and retrieve all airfoil_series values
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT airfoil_series FROM airfoils")
-            series_list = [row[0] for row in cursor.fetchall() if row[0]]
+        with Session(self.engine) as session:
+            statement = select(Airfoil.airfoil_series)
+            series_list = [row for row in session.exec(statement) if row]
         
         if not series_list:
             print("No airfoil series data found in the database.")
@@ -702,42 +730,40 @@ class AirfoilDatabase:
         ax.legend()
 
         if output_dir is None:
-            if ax is None: #If no ax was passed, show the plot.
+            if ax is None:  # If no ax was passed, show the plot.
                 plt.show()
         else:
             if output_name is None:
                 output_name = ' vs '.join(names) + '.png'
             plt.savefig(os.path.join(output_dir, output_name))
 
-        return ax #Return the ax object.
+        return ax  # Return the ax object.
     
     def add_airfoil_to_plot(self, airfoil_name, ax, linestyle='-', marker='o', markersize=3, label=None):
         """Adds an airfoil's point cloud to a Matplotlib plot."""
         try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
-                cursor.execute("SELECT pointcloud FROM airfoils WHERE name = ?", (airfoil_name,))
-                result = cursor.fetchone()
+            with Session(self.engine) as session:
+                statement = select(Airfoil.pointcloud).where(Airfoil.name == airfoil_name)
+                result = session.exec(statement).first()
 
-                if result and result[0]:
-                    pointcloud_str = result[0]
+                if result:
+                    pointcloud_str = result
                     points = [line.split() for line in pointcloud_str.strip().split('\n')]
                     points = np.array([[float(p[0]), float(p[1])] for p in points if len(p) == 2])
-                    if label: #check if label exists, if not, then use airfoil name.
+                    if label:  # check if label exists, if not, then use airfoil name.
                         ax.plot(points[:, 0], points[:, 1], linestyle=linestyle, marker=marker, markersize=markersize, label=label)
                     else:
                         ax.plot(points[:, 0], points[:, 1], linestyle=linestyle, marker=marker, markersize=markersize, label=airfoil_name)
                 else:
                     print(f"Airfoil '{airfoil_name}' not found.")
 
-        except sqlite3.Error as e:
+        except Exception as e:
             print(f"Error plotting airfoil: {e}")
     
     def find_best_matching_airfoils(self, input_pointcloud_str, num_matches=3):
         """
         Compares an input point cloud to the airfoils in the database and returns the best matches.
         """
-        # try:
         input_points = [line.split() for line in input_pointcloud_str.strip().split('\n')]
         input_points = np.array([[float(p[0]), float(p[1])] for p in input_points if len(p) == 2])
         normalized_input_points = normalize_pointcloud(input_points)
@@ -747,10 +773,9 @@ class AirfoilDatabase:
         interpolated_input_points = interpolate_points(normalized_input_points)
 
         matches = []
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT name, pointcloud FROM airfoils")
-            airfoils = cursor.fetchall()
+        with Session(self.engine) as session:
+            statement = select(Airfoil.name, Airfoil.pointcloud)
+            airfoils = session.exec(statement).all()
 
             for name, db_pointcloud_str in airfoils:
                 db_points = [line.split() for line in db_pointcloud_str.strip().split('\n')]
@@ -768,22 +793,16 @@ class AirfoilDatabase:
         matches.sort(key=lambda x: x[1])  # Sort by distance
         return matches[:num_matches]  # Return the top matches
 
-        # except Exception as e:
-        #     print(f"Error finding best matching airfoils: {e}")
-        #     return []
-
     def compute_geometry_metrics(self):
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT name, pointcloud FROM airfoils")
-            airfoils = cursor.fetchall()
+        with Session(self.engine) as session:
+            statement = select(Airfoil.name, Airfoil.pointcloud)
+            airfoils = session.exec(statement).all()
 
             for name, pointcloud in airfoils:
                 rows = pointcloud.split('\n')
                 rows = [x for x in rows if x.strip()]
                 points = np.array([np.fromstring(row, dtype=float, sep=' ') for row in rows])
-                #points = reorder_airfoil_data(points)
-
+                
                 x_coords, thickness, camber = compute_thickness_camber(points)
                 LE_radius = leading_edge_radius(points)
                 TE_angle = trailing_edge_angle(points)
@@ -801,11 +820,40 @@ class AirfoilDatabase:
                 camber_dist_str = ",".join(map(str, camber))
                 normalized_chord_str = ",".join(map(str, normalized_chord))
 
-                cursor.execute("""
-                    INSERT OR REPLACE INTO airfoil_geometry (name, max_thickness, max_camber, leading_edge_radius, trailing_edge_angle, chord_length, thickness_to_chord_ratio, aspect_ratio, thickness_distribution, camber_distribution, normalized_chord)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (name, max_thickness, max_camber, LE_radius, TE_angle, chord_length, t_to_c, aspect_ratio, thickness_dist_str, camber_dist_str, normalized_chord_str))
-                conn.commit()
+                # Check if geometry entry exists
+                statement = select(AirfoilGeometry).where(AirfoilGeometry.name == name)
+                existing_geometry = session.exec(statement).first()
+                
+                if existing_geometry:
+                    # Update existing geometry
+                    existing_geometry.max_thickness = max_thickness
+                    existing_geometry.max_camber = max_camber
+                    existing_geometry.leading_edge_radius = LE_radius
+                    existing_geometry.trailing_edge_angle = TE_angle
+                    existing_geometry.chord_length = chord_length
+                    existing_geometry.thickness_to_chord_ratio = t_to_c
+                    existing_geometry.aspect_ratio = aspect_ratio
+                    existing_geometry.thickness_distribution = thickness_dist_str
+                    existing_geometry.camber_distribution = camber_dist_str
+                    existing_geometry.normalized_chord = normalized_chord_str
+                else:
+                    # Create new geometry
+                    geometry = AirfoilGeometry(
+                        name=name,
+                        max_thickness=max_thickness,
+                        max_camber=max_camber,
+                        leading_edge_radius=LE_radius,
+                        trailing_edge_angle=TE_angle,
+                        chord_length=chord_length,
+                        thickness_to_chord_ratio=t_to_c,
+                        aspect_ratio=aspect_ratio,
+                        thickness_distribution=thickness_dist_str,
+                        camber_distribution=camber_dist_str,
+                        normalized_chord=normalized_chord_str
+                    )
+                    session.add(geometry)
+                
+                session.commit()
                 print(f"Geometry metrics computed and stored for {name}")
 
     def find_airfoils_by_geometry(self, parameter, target_value, tolerance, tolerance_type="absolute"):
@@ -826,9 +874,7 @@ class AirfoilDatabase:
             print(f"Invalid parameter. Choose from: {', '.join(valid_parameters)}")
             return []
 
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-
+        with Session(self.engine) as session:
             if tolerance_type == "absolute":
                 lower_bound = target_value - tolerance
                 upper_bound = target_value + tolerance
@@ -839,11 +885,15 @@ class AirfoilDatabase:
                 print("Invalid tolerance_type. Choose 'absolute' or 'percentage'.")
                 return []
 
-            query = f"SELECT name FROM airfoil_geometry WHERE {parameter} BETWEEN ? AND ?"
-            cursor.execute(query, (lower_bound, upper_bound))
-            results = cursor.fetchall()
+            # Create a dynamic query using SQLAlchemy expressions
+            column = getattr(AirfoilGeometry, parameter)
+            statement = select(AirfoilGeometry.name).where(
+                (column >= lower_bound) & (column <= upper_bound)
+            )
+            
+            results = session.exec(statement).all()
 
-            airfoil_names = [row[0] for row in results]
+            airfoil_names = results
             if airfoil_names:
                 print(f"Airfoils matching {parameter} = {target_value} ({tolerance} {tolerance_type}):")
                 for name in airfoil_names:
@@ -855,13 +905,14 @@ class AirfoilDatabase:
     
     def plot_leading_edge_radius(self, parameter="chord_length"):
         """Plots leading-edge radius against a specified parameter."""
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute(f"SELECT name, leading_edge_radius, {parameter} FROM airfoil_geometry")
-            results = cursor.fetchall()
+        with Session(self.engine) as session:
+            # Create dynamic query to select the needed columns
+            column = getattr(AirfoilGeometry, parameter)
+            statement = select(AirfoilGeometry.name, AirfoilGeometry.leading_edge_radius, column)
+            results = session.exec(statement).all()
 
         if results:
-            names, radii, params = zip(*results)
+            names, radii, params = zip(*[(r[0], r[1], r[2]) for r in results])
             plt.figure(figsize=(8, 6))
             plt.scatter(params, radii)
             plt.xlabel(parameter)
@@ -872,13 +923,14 @@ class AirfoilDatabase:
 
     def plot_trailing_edge_angle(self, parameter="chord_length"):
         """Plots trailing-edge angle against a specified parameter."""
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute(f"SELECT name, trailing_edge_angle, {parameter} FROM airfoil_geometry")
-            results = cursor.fetchall()
+        with Session(self.engine) as session:
+            # Create dynamic query to select the needed columns
+            column = getattr(AirfoilGeometry, parameter)
+            statement = select(AirfoilGeometry.name, AirfoilGeometry.trailing_edge_angle, column)
+            results = session.exec(statement).all()
 
         if results:
-            names, angles, params = zip(*results)
+            names, angles, params = zip(*[(r[0], r[1], r[2]) for r in results])
             plt.figure(figsize=(8, 6))
             plt.scatter(params, angles)
             plt.xlabel(parameter)
@@ -889,13 +941,24 @@ class AirfoilDatabase:
 
     def plot_geometry_correlations(self):
         """Plots correlations between geometric parameters using a heatmap."""
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT max_thickness, max_camber, leading_edge_radius, trailing_edge_angle, chord_length, thickness_to_chord_ratio, aspect_ratio FROM airfoil_geometry")
-            results = cursor.fetchall()
+        with Session(self.engine) as session:
+            statement = select(
+                AirfoilGeometry.max_thickness, 
+                AirfoilGeometry.max_camber, 
+                AirfoilGeometry.leading_edge_radius, 
+                AirfoilGeometry.trailing_edge_angle, 
+                AirfoilGeometry.chord_length, 
+                AirfoilGeometry.thickness_to_chord_ratio, 
+                AirfoilGeometry.aspect_ratio
+            )
+            results = session.exec(statement).all()
 
         if results:
-            df = pd.DataFrame(results, columns=["max_thickness", "max_camber", "leading_edge_radius", "trailing_edge_angle", "chord_length", "thickness_to_chord_ratio", "aspect_ratio"])
+            # Convert results to a DataFrame
+            columns = ["max_thickness", "max_camber", "leading_edge_radius", "trailing_edge_angle", 
+                       "chord_length", "thickness_to_chord_ratio", "aspect_ratio"]
+            df = pd.DataFrame(results, columns=columns)
+            
             correlation_matrix = df.corr()
             plt.figure(figsize=(10, 8))
             sns.heatmap(correlation_matrix, annot=True, cmap="coolwarm", fmt=".2f")
@@ -904,27 +967,41 @@ class AirfoilDatabase:
     
     def store_aero_coeffs(self, name, reynolds_number, mach, ncrit, alpha, cl, cd, cm):
         """Stores a single row of aerodynamic coefficient data."""
-        # Ensure this method handles database connection safely (e.g., using 'with')
-        # Your existing implementation likely does this already.
         try:
-            # Using write_lock if needed for thread safety, although ProcessPoolExecutor
-            # might make this less critical unless multiple AirfoilDatabase instances
-            # are used across processes with the same DB file without WAL.
-            # with self.write_lock: # Uncomment if thread safety issues arise
-            with sqlite3.connect(self.db_path, timeout=10.0) as conn: # Added timeout
-                cursor = conn.cursor()
-                # Use INSERT OR REPLACE to handle potential unique constraint violations gracefully
-                cursor.execute("""
-                    INSERT OR REPLACE INTO aero_coeffs (name, reynolds_number, mach, ncrit, alpha, cl, cd, cm)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """, (name, reynolds_number, mach, ncrit, alpha, cl, cd, cm))
-                conn.commit()
-                # Reduce logging noise, maybe log only periodically or on completion
-                # logging.debug(f"Stored aero coeffs for {name} (Re={reynolds_number}, M={mach}, A={alpha})")
-        except sqlite3.Error as e:
-            logging.error(f"SQLite error storing aero coeffs for {name} Re={reynolds_number} M={mach} Ncrit={ncrit} A={alpha}: {e}")
+            with Session(self.engine) as session:
+                # Check if record already exists
+                statement = select(AeroCoeff).where(
+                    (AeroCoeff.name == name) & 
+                    (AeroCoeff.reynolds_number == reynolds_number) & 
+                    (AeroCoeff.mach == mach) & 
+                    (AeroCoeff.alpha == alpha)
+                )
+                existing_coeff = session.exec(statement).first()
+                
+                if existing_coeff:
+                    # Update existing record
+                    existing_coeff.ncrit = ncrit
+                    existing_coeff.cl = cl
+                    existing_coeff.cd = cd
+                    existing_coeff.cm = cm
+                    session.add(existing_coeff)
+                else:
+                    # Create new record
+                    aero_coeff = AeroCoeff(
+                        name=name,
+                        reynolds_number=reynolds_number,
+                        mach=mach,
+                        ncrit=ncrit,
+                        alpha=alpha,
+                        cl=cl,
+                        cd=cd,
+                        cm=cm
+                    )
+                    session.add(aero_coeff)
+                
+                session.commit()
         except Exception as e:
-             logging.error(f"Unexpected error storing aero coeffs for {name} Re={reynolds_number} M={mach} Ncrit={ncrit} A={alpha}: {e}")
+            logging.error(f"Error storing aero coeffs for {name} Re={reynolds_number} M={mach} Ncrit={ncrit} A={alpha}: {e}")
 
     def run_airfoil_through_xfoil(self, airfoil_name, reynolds_list, mach_list, alpha_list, ncrit_list, xfoil_path=None, max_workers=None):
         """
@@ -942,7 +1019,6 @@ class AirfoilDatabase:
         logging.info(f"Initiating XFoil run for airfoil: {airfoil_name}")
         try:
             # Instantiate the runner, passing self (the database instance)
-            # This instance itself is NOT passed to worker processes in the refactored runner
             runner = XFoilRunner(database=self, xfoil_executable=xfoil_path)
             # Run the analysis in parallel across conditions
             runner.run_analysis_parallel(
@@ -955,10 +1031,8 @@ class AirfoilDatabase:
             )
             logging.info(f"Completed XFoil run for airfoil: {airfoil_name}")
         except FileNotFoundError:
-             # Raised by the runner if the executable is not found
-             logging.error(f"XFoil executable not found via path '{xfoil_path if xfoil_path else 'default'}'. Aborting run for {airfoil_name}.")
-             # Optionally re-raise if you want the calling code to handle it
-             # raise
+            # Raised by the runner if the executable is not found
+            logging.error(f"XFoil executable not found via path '{xfoil_path if xfoil_path else 'default'}'. Aborting run for {airfoil_name}.")
         except Exception as e:
             logging.error(f"An error occurred during XFoil run for {airfoil_name}: {e}", exc_info=True)
 
@@ -978,15 +1052,15 @@ class AirfoilDatabase:
         logging.info("Starting XFoil analysis for all airfoils in the database.")
         airfoil_names = []
         try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
+            with Session(self.engine) as session:
                 # Fetch only names that have pointcloud data
-                cursor.execute("SELECT name FROM airfoils WHERE pointcloud IS NOT NULL AND pointcloud != '' ORDER BY name") # Added ORDER BY
-                results = cursor.fetchall()
-                airfoil_names = [row[0] for row in results]
-        except sqlite3.Error as e:
+                statement = select(Airfoil.name).where(
+                    (Airfoil.pointcloud != None) & (Airfoil.pointcloud != "")
+                ).order_by(Airfoil.name)
+                airfoil_names = session.exec(statement).all()
+        except Exception as e:
             logging.error(f"Failed to retrieve airfoil names from database: {e}")
-            return # Cannot proceed without airfoil names
+            return  # Cannot proceed without airfoil names
 
         if not airfoil_names:
             logging.warning("No airfoils with pointcloud data found in the database to run.")
@@ -995,65 +1069,57 @@ class AirfoilDatabase:
         logging.info(f"Found {len(airfoil_names)} airfoils to process.")
 
         # Run analysis for each airfoil serially.
-        # Parallelism happens *within* run_airfoil_through_xfoil for conditions.
-        # To run different *airfoils* in parallel, this loop would need modification
-        # (e.g., using another ProcessPoolExecutor here).
         for i, name in enumerate(airfoil_names):
             logging.info(f"--- Processing airfoil {i+1}/{len(airfoil_names)}: {name} ---")
-            # Check if airfoil still exists ( belt-and-suspenders check, might be redundant)
+            # Check if airfoil still exists
             if self.get_airfoil_data(name):
-                 self.run_airfoil_through_xfoil(
-                     airfoil_name=name,
-                     reynolds_list=reynolds_list,
-                     mach_list=mach_list,
-                     alpha_list=alpha_list,
-                     ncrit_list=ncrit_list,
-                     xfoil_path=xfoil_path,
-                     max_workers=max_workers
-                 )
+                self.run_airfoil_through_xfoil(
+                    airfoil_name=name,
+                    reynolds_list=reynolds_list,
+                    mach_list=mach_list,
+                    alpha_list=alpha_list,
+                    ncrit_list=ncrit_list,
+                    xfoil_path=xfoil_path,
+                    max_workers=max_workers
+                )
             else:
-                 logging.warning(f"Skipping airfoil {name} as it seems to have been removed or lacks data.")
+                logging.warning(f"Skipping airfoil {name} as it seems to have been removed or lacks data.")
             logging.info(f"--- Finished processing airfoil: {name} ---")
 
         logging.info("Completed XFoil analysis for all airfoils.")
     
     def get_aero_coeffs(self, name, Re=None, Mach=None):
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            query = "SELECT * FROM aero_coeffs WHERE name = ?"
-            params = [name]
+        with Session(self.engine) as session:
+            # Start building the query
+            statement = select(AeroCoeff).where(AeroCoeff.name == name)
+            
+            # Add optional filters
             if Re is not None:
-                query += " AND reynolds_number = ?"
-                params.append(Re)
+                statement = statement.where(AeroCoeff.reynolds_number == Re)
             if Mach is not None:
-                query += " AND mach = ?"
-                params.append(Mach)
-            cursor.execute(query, tuple(params))
-            return cursor.fetchall()
+                statement = statement.where(AeroCoeff.mach == Mach)
+            
+            # Execute the query and return the results
+            results = session.exec(statement).all()
+            return results
 
-    def find_airfoils_by_xfoil_results(self, 
-                                       parameter, 
-                                       target_value, 
-                                       tolerance, 
-                                       tolerance_type="absolute"):
+    def find_airfoils_by_xfoil_results(self, parameter, target_value, tolerance, tolerance_type="absolute"):
         """
         Finds airfoils based on XFOIL results.
 
         Args:
-            parameter (str): The XFOIL result parameter (reynolds, alpha, cl, cd, cm).
+            parameter (str): The XFOIL result parameter (reynolds_number, alpha, cl, cd, cm, mach, ncrit).
             target_value (float): The target value for the parameter.
             tolerance (float): The tolerance for the search.
             tolerance_type (str): "absolute" or "percentage".
         """
-        valid_parameters = ["reynolds", "alpha", "mach", "ncrit", "cl", "cd", "cm"]
+        valid_parameters = ["reynolds_number", "alpha", "mach", "ncrit", "cl", "cd", "cm"]
 
         if parameter not in valid_parameters:
             print(f"Invalid parameter. Choose from: {', '.join(valid_parameters)}")
             return []
 
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-
+        with Session(self.engine) as session:
             if tolerance_type == "absolute":
                 lower_bound = target_value - tolerance
                 upper_bound = target_value + tolerance
@@ -1063,68 +1129,115 @@ class AirfoilDatabase:
             else:
                 print("Invalid tolerance_type. Choose 'absolute' or 'percentage'.")
                 return []
-            print(parameter)
-            query = f"SELECT name FROM aero_coeffs WHERE {parameter} BETWEEN ? AND ?"
-            print(lower_bound)
-            print(upper_bound)
-            cursor.execute(query, (lower_bound, upper_bound))
-            results = cursor.fetchall()
-            print(results)
 
-            airfoil_names = [row[0] for row in results]
-            if airfoil_names:
+            # Create a dynamic query using SQLAlchemy expressions
+            column = getattr(AeroCoeff, parameter)
+            statement = select(AeroCoeff.name).where(
+                (column >= lower_bound) & (column <= upper_bound)
+            ).distinct()
+            
+            results = session.exec(statement).all()
+
+            if results:
                 print(f"Airfoils matching {parameter} = {target_value} ({tolerance} {tolerance_type}):")
-                for name in airfoil_names:
+                for name in results:
                     print(f"- {name}")
-                return airfoil_names
+                return results
             else:
                 print(f"No airfoils found matching {parameter} = {target_value} ({tolerance} {tolerance_type}).")
                 return []
 
     def plot_polar(self, name, Re, Mach):
-        df = self.get_aero_coeffs(name, Re, Mach)
-        if df is None or df.empty:
+        """Plots the polar (Cl vs Cd) for a specific airfoil, Reynolds number, and Mach number."""
+        aero_data = self.get_aero_coeffs(name, Re, Mach)
+        if not aero_data:
             print(f"No aerodynamic data found for {name} (Re={Re}, Mach={Mach})")
             return
         
+        # Extract Cl and Cd values
+        cl_values = [data.cl for data in aero_data if data.cl is not None]
+        cd_values = [data.cd for data in aero_data if data.cd is not None]
+        
+        if not cl_values or not cd_values:
+            print(f"Insufficient data for polar plot for {name} (Re={Re}, Mach={Mach})")
+            return
+        
         plt.figure(figsize=(8, 6))
-        plt.plot(df["Cd"], df["Cl"], marker='o', linestyle='-')
+        plt.plot(cd_values, cl_values, marker='o', linestyle='-')
         plt.xlabel("Cd (Drag Coefficient)")
         plt.ylabel("Cl (Lift Coefficient)")
         plt.title(f"Lift-Drag Polar for {name} (Re={Re}, Mach={Mach})")
         plt.grid()
         plt.show()
 
-    def plot_coeff_vs_alpha(self, name, coeff="Cl", Re=None, Mach=None):
-        if coeff not in ["Cl", "Cd", "Cm"]:
-            print("Invalid coefficient. Choose 'Cl', 'Cd', or 'Cm'.")
+    def plot_coeff_vs_alpha(self, name, coeff="cl", Re=None, Mach=None):
+        """
+        Plots a coefficient (cl, cd, or cm) versus angle of attack for a specific airfoil.
+        
+        Args:
+            name (str): The name of the airfoil.
+            coeff (str): The coefficient to plot ('cl', 'cd', or 'cm').
+            Re (float, optional): Reynolds number filter.
+            Mach (float, optional): Mach number filter.
+        """
+        if coeff.lower() not in ["cl", "cd", "cm"]:
+            print("Invalid coefficient. Choose 'cl', 'cd', or 'cm'.")
             return
 
-        df = self.get_aero_coeffs(name, Re, Mach)
-        if df is None or df.empty:
+        aero_data = self.get_aero_coeffs(name, Re, Mach)
+        if not aero_data:
             print(f"No aerodynamic data found for {name} (Re={Re}, Mach={Mach})")
             return
         
+        # Extract alpha and coefficient values
+        alpha_values = []
+        coeff_values = []
+        
+        for data in aero_data:
+            coeff_value = getattr(data, coeff.lower())
+            if data.alpha is not None and coeff_value is not None:
+                alpha_values.append(data.alpha)
+                coeff_values.append(coeff_value)
+        
+        if not alpha_values or not coeff_values:
+            print(f"Insufficient data for {coeff.upper()} vs alpha plot for {name} (Re={Re}, Mach={Mach})")
+            return
+        
+        # Sort by alpha for proper line plotting
+        sorted_data = sorted(zip(alpha_values, coeff_values))
+        alpha_values, coeff_values = zip(*sorted_data)
+        
         plt.figure(figsize=(8, 6))
-        plt.plot(df["Alpha"], df[coeff], marker='o', linestyle='-')
+        plt.plot(alpha_values, coeff_values, marker='o', linestyle='-')
         plt.xlabel("Angle of Attack (α)")
-        plt.ylabel(coeff)
-        plt.title(f"{coeff} vs. Alpha for {name} (Re={Re}, Mach={Mach})")
+        plt.ylabel(f"{coeff.upper()} Coefficient")
+        plt.title(f"{coeff.upper()} vs. Alpha for {name}" + 
+                 (f" (Re={Re})" if Re is not None else "") + 
+                 (f" (Mach={Mach})" if Mach is not None else ""))
         plt.grid()
         plt.show()
 
     def clear_database(self):
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute("DELETE FROM airfoils")
-            cursor.execute("DELETE FROM aero_coeffs")
-            conn.commit()
-            print("Database cleared.")
+        """Clears all data from the database."""
+        try:
+            with Session(self.engine) as session:
+                # Delete all records from each table
+                # Delete in reverse order of dependencies
+                session.exec(delete(AeroCoeff))
+                session.exec(delete(AirfoilGeometry))
+                session.exec(delete(Airfoil))
+                session.commit()
+                print("Database cleared.")
+        except Exception as e:
+            print(f"Error clearing database: {e}")
 
     def close(self):
-        # If you manage a persistent connection in __init__, close it here.
-        # Since the methods use 'with sqlite3.connect()', explicit close might not be needed.
-        logging.info("Database connection closed.")
+        """Close the database connection."""
+        # SQLModel with Session doesn't require explicit connection closing
+        # as it's handled by the context manager, but we can dispose the engine
+        if hasattr(self, 'engine'):
+            self.engine.dispose()
+            logging.info("Database engine disposed.")
 
 
 if __name__ == "__main__":
@@ -1136,9 +1249,7 @@ if __name__ == "__main__":
     airfoil_names = []
     folder = r'D:\Mitchell\School\2025 Winter\github\airfoil_database\airfoil_dat_files'
     files = get_files_starting_with(folder, 'm')
-    #print(files)
-    #airfoil_name = 'ag10'
-
+    
     db = AirfoilDatabase(db_dir="airfoil_database", db_name='airfoils.db')
     for file in files:
         airfoil_name = file.split('.')[0]
@@ -1147,26 +1258,5 @@ if __name__ == "__main__":
                                     mach_list, 
                                     alpha_list, 
                                     ncrit_list)
-    #out = db.get_aero_coeffs(airfoil_name)
-    #print(out)
-    #db.run_all_airfoils(reynolds_list, mach_list, alpha_list, ncrit_list)
-    """out = db.get_airfoil_data(airfoil_name)
-    out_folder = rf'D:\Mitchell\School\airfoils\{airfoil_name}'
-    if not os.path.exists(out_folder):
-        os.mkdir(out_folder)
-    with open(os.path.join(out_folder, f'{airfoil_name}_0.dat'), 'w+') as file:
-        file.write(out[1])
-    print(out)"""
-    """db.fix_all_airfoils()
-    out = db.get_airfoil_data('ag10')
-    print(out)"""
-    # db.update_airfoil_series()
-    # db.compute_geometry_metrics()
-    # db.check_airfoil_validity()
-    # db.fix_all_airfoils()
-    # db.check_airfoil_validity()
+    
     db.close()
-    
-
-    
-    

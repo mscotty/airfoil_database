@@ -8,6 +8,7 @@ Classifier: Programming Language :: Python :: 3.12
 Requires-Python: >=3.8
 Description-Content-Type: text/markdown
 Requires-Dist: numpy
+Requires-Dist: matplotlib
 Requires-Dist: ambiance
 Requires-Dist: pandas
 Requires-Dist: scipy
@@ -21,6 +22,8 @@ Requires-Dist: shapely
 Requires-Dist: PyQt6
 Requires-Dist: statsmodels
 Requires-Dist: scikit-learn
+Requires-Dist: requests
+Requires-Dist: bs4
 Provides-Extra: dev
 Requires-Dist: pytest; extra == "dev"
 Requires-Dist: mypy; extra == "dev"

@@ -4,16 +4,15 @@ import os
 import time
 import logging
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_completed
-from urllib.parse import urljoin # For joining relative URLs
+from urllib.parse import urljoin, urlparse  # For joining relative URLs
 import numpy as np
+from sqlmodel import Session
 
-# Assuming these classes/functions are accessible in your project structure
-# Adjust imports as necessary
-from airfoil_database.classes.AirfoilDatabase import AirfoilDatabase
-from airfoil_database.classes.AirfoilSeries import AirfoilSeries
-# Import from the fixer module artifact ID pointcloud_fixer_module_v3
-from airfoil_database.xfoil.fix_point_cloud import parse_airfoil_dat_file, format_pointcloud_array, DEFAULT_FIXER_CONFIG
-from airfoil_database.utilities.web.custom_parser import parse_file
+# --- Import from refactored code ---
+from airfoil_database import AirfoilDatabase, Airfoil, AirfoilSeries # Core
+from airfoil_database import PointcloudProcessor # XFoil
+#from airfoil_database.utilities.web.custom_parser import parse_file # Utilities web
+from airfoil_database.utils.helpers import DEFAULT_FIXER_CONFIG # Utilities
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -117,42 +116,44 @@ def download_all_files_concurrently(urls, save_dir, max_workers=10):
 
 # --- Parsing Worker ---
 def parse_file_worker(filepath):
-    """Parses a single .dat file using the fixer module's parser."""
+    """Parses a single .dat file using the PointcloudProcessor."""
     try:
-        # Use the parser from the Canvas artifact
-        #airfoil_name_from_file, points_array = parse_airfoil_dat_file(filepath)
-        points_array = parse_file(filepath)
-        airfoil_name_from_file = None
+        # Read the contents of the file
+        with open(filepath, 'r') as f:
+            pointcloud_str = f.read()
+        
+        # Fix point cloud using the PointcloudProcessor
+        points_array = PointcloudProcessor.fix_airfoil_pointcloud(
+            name=os.path.basename(filepath),  # Use filename as name for now
+            pointcloud_str=pointcloud_str,
+            config=DEFAULT_FIXER_CONFIG
+        )
 
         if points_array is None:
-            logging.warning(f"Could not parse points from file: {filepath}")
-            return None # Skip files that fail parsing
+            logging.warning(f"Could not fix points from file: {filepath}")
+            return None  # Skip files that fail parsing
 
-        # Derive name from filename as fallback or primary identifier
+        # Derive name from filename
         base_name = os.path.splitext(os.path.basename(filepath))[0]
-        # Use name from file content if available and seems valid, else use filename
-        airfoil_name = airfoil_name_from_file if airfoil_name_from_file else base_name
 
-        # Format points back to string for DB storage (or store array if DB supports it)
-        # Using the precision from the default config
+        # Format points back to string for DB storage
         pointcloud_str = format_pointcloud_array(points_array, DEFAULT_FIXER_CONFIG.get('precision', 10))
         if not pointcloud_str:
-             logging.warning(f"Formatting parsed points failed for: {filepath}")
-             return None
+            logging.warning(f"Formatting parsed points failed for: {filepath}")
+            return None
 
-        # Identify series (can be slow if complex, consider optimizing AirfoilSeries)
-        airfoil_series = AirfoilSeries.identify_airfoil_series(airfoil_name)
-        # Use name from file content as description? Or keep it simple?
-        description = airfoil_name_from_file if airfoil_name_from_file else f"{base_name} Airfoil"
-        source_url = f"file://{filepath}" # Placeholder
+        # Identify series
+        airfoil_series = AirfoilSeries.identify_airfoil_series(base_name)
+        description = f"{base_name} Airfoil"
+        source_url = f"file://{filepath}"  # Placeholder
 
+        # Return a dictionary that matches the SQLModel Airfoil class fields
         return {
-            'name': base_name, # Use filename base as the primary key name
+            'name': base_name,
             'description': description,
             'pointcloud': pointcloud_str,
-            'airfoil_series': airfoil_series.value, # Store enum value if needed
-            'source': source_url, # Store original download URL here eventually
-            'filepath': filepath # Keep track of original file path
+            'airfoil_series': airfoil_series.value,
+            'source': source_url
         }
 
     except Exception as e:
@@ -164,7 +165,7 @@ def parse_all_files_concurrently(filepaths, max_workers=None):
     """Parses all downloaded .dat files concurrently."""
     parsed_data_list = []
     if not max_workers:
-        max_workers = os.cpu_count() # Default to number of CPU cores for parsing
+        max_workers = os.cpu_count()  # Default to number of CPU cores for parsing
 
     logging.info(f"Starting concurrent parsing of {len(filepaths)} files with max {max_workers} workers...")
     with ProcessPoolExecutor(max_workers=max_workers) as executor:
@@ -173,7 +174,7 @@ def parse_all_files_concurrently(filepaths, max_workers=None):
             filepath = future_to_filepath[future]
             try:
                 parsed_data = future.result()
-                if parsed_data:
+                if parsed_data
                     parsed_data_list.append(parsed_data)
             except Exception as exc:
                 logging.error(f"File {filepath} generated an exception during parsing task: {exc}", exc_info=True)
@@ -183,9 +184,9 @@ def parse_all_files_concurrently(filepaths, max_workers=None):
 
 # --- Main Download and Store Function ---
 def download_and_store_airfoils(start_url,
-                                save_dir="airfoil_dat_files", # Changed default save dir
+                                save_dir="airfoil_dat_files",
                                 db_name="airfoil_data.db",
-                                db_dir="airfoil_database", # Changed default db dir
+                                db_dir="airfoil_database",
                                 overwrite=False,
                                 max_download_workers=10,
                                 max_parse_workers=None):
@@ -207,60 +208,59 @@ def download_and_store_airfoils(start_url,
 
     # 3. Parse all downloaded files concurrently
     parsed_airfoil_data = parse_all_files_concurrently(downloaded_filepaths, max_parse_workers)
-    if not parsed_airfoil_data:
+    if not parsed_airfoil_data
         logging.error("No files were successfully parsed. Exiting.")
         return
 
-    # 4. Store data in bulk
+    # 4. Store data in SQLModel database
     logging.info(f"Attempting to store data for {len(parsed_airfoil_data)} airfoils in the database.")
     airfoil_db = AirfoilDatabase(db_name=db_name, db_dir=db_dir)
+
     try:
-        # Assumes AirfoilDatabase has a 'store_bulk_airfoil_data' method
+        # Use the store_bulk_airfoil_data method which has been updated for SQLModel
         success_count = airfoil_db.store_bulk_airfoil_data(parsed_airfoil_data, overwrite=overwrite)
         logging.info(f"Successfully stored data for {success_count} airfoils.")
-    except AttributeError:
-         logging.error("AirfoilDatabase object does not have method 'store_bulk_airfoil_data'. Cannot store in bulk.")
-         logging.info("Attempting to store individually (slower)...")
-         success_count = 0
-         for data in parsed_airfoil_data:
-              try:
-                   # Fallback to individual storage if bulk method doesn't exist
-                   # Ensure store_airfoil_data signature matches needed fields
-                   airfoil_db.store_airfoil_data(
-                        name=data['name'],
-                        description=data['description'],
-                        pointcloud_str=data['pointcloud'],
-                        airfoil_series=data['airfoil_series'], # Pass the value directly
-                        source=data['source'] # Assuming source is the 5th arg
-                        # Add filepath if store_airfoil_data accepts it: filepath=data['filepath']
-                   )
-                   success_count += 1
-              except Exception as store_err:
-                   logging.error(f"Failed to store airfoil {data.get('name', 'N/A')} individually: {store_err}")
-         logging.info(f"Successfully stored data for {success_count} airfoils individually.")
-
     except Exception as e:
         logging.error(f"An error occurred during database storage: {e}", exc_info=True)
+
+        # Fallback to individual storage if bulk method fails
+        logging.info("Attempting to store individually (slower)...")
+        success_count = 0
+
+        for data in parsed_airfoil_data
+            try:
+                # No need to convert AirfoilSeries if it's already a value
+                # Store individual airfoil
+                airfoil_db.store_airfoil_data(
+                    name=data['name'],
+                    description=data['description'],
+                    pointcloud=data['pointcloud'],
+                    airfoil_series=AirfoilSeries(data['airfoil_series']),  # Convert to AirfoilSeries enum
+                    source=data['source'],
+                    overwrite=overwrite
+                )
+                success_count += 1
+            except Exception as store_err:
+                logging.error(f"Failed to store airfoil {data.get('name', 'N/A')} individually: {store_err}")
+
+        logging.info(f"Successfully stored data for {success_count} airfoils individually.")
     finally:
-        airfoil_db.close() # Ensure DB connection is closed
+        # Close the database connection
+        airfoil_db.close()
 
     logging.info("Finished processing all .dat files.")
 
-
 # --- Entry Point ---
 if __name__ == "__main__":
-    from urllib.parse import urlparse # Ensure urlparse is imported
-
     start_time = time.time()
     download_and_store_airfoils(
         start_url="https://m-selig.ae.illinois.edu/ads/coord_database.html",
-        save_dir="airfoil_dat_files", # Directory for .dat files
-        db_dir="airfoil_database",   # Directory for the SQLite DB
-        db_name="airfoils.db", # Specific DB name
-        overwrite=True,              # Overwrite existing data in DB for this run
-        max_download_workers=30,     # Increase download concurrency
-        max_parse_workers=None       # Use default (CPU count) for parsing
+        save_dir="airfoil_dat_files",  # Directory for .dat files
+        db_dir="airfoil_database",    # Directory for the SQLite DB
+        db_name="airfoils.db",  # Specific DB name
+        overwrite=True,               # Overwrite existing data in DB for this run
+        max_download_workers=30,      # Increase download concurrency
+        max_parse_workers=None        # Use default (CPU count) for parsing
     )
     end_time = time.time()
     logging.info(f"Total execution time: {end_time - start_time:.2f} seconds")
-

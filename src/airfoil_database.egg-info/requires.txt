@@ -15,6 +15,7 @@ statsmodels
 scikit-learn
 requests
 bs4
+sqlmodel
 
 [dev]
 pytest

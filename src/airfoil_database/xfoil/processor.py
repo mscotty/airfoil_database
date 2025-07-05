@@ -5,6 +5,15 @@ import numpy as np
 import tempfile
 import subprocess
 from typing import List, Optional, Dict, Any, Tuple
+from sqlmodel import Session, select
+from airfoil_database import Airfoil
+from .fix_point_cloud import fix_pointcloud
+from airfoil_database.xfoil.fix_point_cloud import normalize_airfoil
+from airfoil_database.xfoil.interpolate_points import interpolate_points
+from airfoil_database.xfoil.calculate_distance import calculate_min_distance_sum
+from airfoil_database.utilities.helpers import pointcloud_string_to_array
+from airfoil_database.xfoil.fix_point_cloud_simple import AirfoilProcessor
+
 
 class PointcloudProcessor:
     @staticmethod
@@ -20,29 +29,14 @@ class PointcloudProcessor:
         Returns:
             np.ndarray or None: The fixed pointcloud as a numpy array, or None if fixing failed
         """
-        from airfoil_database.utils.helpers import parse_pointcloud_string, fix_pointcloud
-        
         logging.info(f"Attempting to fix pointcloud for airfoil: {name}")
         
         # Parse the pointcloud string
-        points_array = parse_pointcloud_string(pointcloud_str)
-        if points_array is None:
-            logging.error(f"Could not parse original pointcloud string for {name}.")
-            return None  # Parsing failed
-
-        # Get the default configuration if none provided
-        from airfoil_database.utils.helpers import DEFAULT_FIXER_CONFIG
-        fixer_config = config if config is not None else DEFAULT_FIXER_CONFIG
-
-        # Call the fixing function
-        fixed_points_array = fix_pointcloud(points_array, fixer_config)
-
-        if fixed_points_array is None:
-            logging.error(f"Pointcloud fixing failed for {name}.")
-            return None
-        else:
-            logging.info(f"Pointcloud fixing successful for {name}.")
-            return fixed_points_array
+        #points_array = pointcloud_string_to_array(pointcloud_str)
+        #fixed_points_array = fix_pointcloud(points_array)
+        processor = AirfoilProcessor()
+        fixed_points_array, info = processor.process(pointcloud_str)
+        return pointcloud_string_to_array(fixed_points_array)
     
     @staticmethod
     def output_pointcloud_to_file(pointcloud_str, file_path):
@@ -74,16 +68,11 @@ class PointcloudProcessor:
         Returns:
             list: List of tuples (name, distance) of the best matching airfoils
         """
-        from airfoil_database.xfoil.fix_airfoil_data import normalize_pointcloud
-        from airfoil_database.xfoil.interpolate_points import interpolate_points
-        from airfoil_database.xfoil.calculate_distance import calculate_min_distance_sum
-        from airfoil_database.utils.helpers import parse_pointcloud_string
-        
-        input_points = parse_pointcloud_string(input_pointcloud_str)
+        input_points = pointcloud_string_to_array(input_pointcloud_str)
         if input_points is None or len(input_points) == 0:
             return []
 
-        normalized_input_points = normalize_pointcloud(input_points)
+        normalized_input_points = normalize_airfoil(input_points)
         if len(normalized_input_points) == 0:
             return []
 
@@ -95,11 +84,11 @@ class PointcloudProcessor:
             airfoils = session.exec(statement).all()
 
             for name, db_pointcloud_str in airfoils:
-                db_points = parse_pointcloud_string(db_pointcloud_str)
+                db_points = pointcloud_string_to_array(db_pointcloud_str)
                 if db_points is None or len(db_points) == 0:
                     continue
                     
-                normalized_db_points = normalize_pointcloud(db_points)
+                normalized_db_points = normalize_airfoil(db_points)
                 if len(normalized_db_points) == 0:
                     continue
                     

@@ -6,7 +6,7 @@ from sqlmodel import Session, select
 from typing import List, Optional, Dict, Any, Tuple
 
 from airfoil_database.core.models import Airfoil, AirfoilGeometry
-from airfoil_database.utils.helpers import _pointcloud_to_numpy
+from airfoil_database.utilities.helpers import pointcloud_string_to_array
 from airfoil_database.formulas.airfoil.compute_aspect_ratio import calculate_aspect_ratio
 from airfoil_database.formulas.airfoil.compute_LE_radius import leading_edge_radius
 from airfoil_database.formulas.airfoil.compute_TE_angle import trailing_edge_angle
@@ -25,7 +25,7 @@ class GeometryAnalyzer:
             result = session.exec(statement).first()
 
             if result:
-                pointcloud_np = _pointcloud_to_numpy(result)
+                pointcloud_np = pointcloud_string_to_array(result)
                 if pointcloud_np.size == 0:
                     return False, "Empty pointcloud"
                 x = pointcloud_np[:, 0]

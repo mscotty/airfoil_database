@@ -1,84 +1,113 @@
-# utils/helpers.py
 import numpy as np
 import logging
-from typing import List, Optional, Union, Dict, Any
 
-def _pointcloud_to_numpy(pointcloud_str):
-    """Converts a pointcloud string to a NumPy array."""
-    if not pointcloud_str:
-        return np.array([])
-    rows = pointcloud_str.strip().split('\n')
-    rows = [x.strip() for x in rows if x.strip()]
-    try:
-        return np.array([np.fromstring(row, dtype=float, sep=' ') for row in rows])
-    except ValueError:
-        return np.array([])
-
-def parse_pointcloud_string(pointcloud_str):
-    """Parse a pointcloud string into a numpy array."""
+def pointcloud_string_to_array(pointcloud_str, min_points=3):
+    """
+    Convert a pointcloud string with x,y coordinates to a numpy array.
+    
+    Args:
+        pointcloud_str (str): String containing x,y coordinates, one pair per line
+                             Format expected: "x1 y1\nx2 y2\n..."
+        min_points (int): Minimum number of points required for a valid pointcloud
+        
+    Returns:
+        np.ndarray: 2D array of shape (n,2) containing x,y coordinates,
+                   or None if conversion failed
+    """
     if not pointcloud_str or not isinstance(pointcloud_str, str):
+        logging.error("Invalid pointcloud string provided")
         return None
-        
+    
     try:
-        rows = pointcloud_str.strip().split('\n')
-        rows = [x.strip() for x in rows if x.strip()]
-        return np.array([np.fromstring(row, dtype=float, sep=' ') for row in rows])
+        # Split the string into lines and process each line
+        lines = pointcloud_str.strip().split('\n')
+        points = []
+        
+        for line in lines:
+            line = line.strip()
+            # Skip empty lines or comment lines
+            if not line or line.startswith('#') or line.startswith('!'):
+                continue
+            
+            # Split the line into components (expecting x y format)
+            components = line.split()
+            if len(components) >= 2:  # Need at least x and y
+                try:
+                    x = float(components[0])
+                    y = float(components[1])
+                    points.append([x, y])
+                except ValueError:
+                    # Skip lines that can't be converted to floats
+                    continue
+        
+        # Check if we have enough points
+        if len(points) < min_points:
+            logging.warning(f"Not enough valid points found: {len(points)}, minimum required: {min_points}")
+            return None
+        
+        # Convert to numpy array
+        return np.array(points)
+        
     except Exception as e:
-        logging.error(f"Error parsing pointcloud string: {e}")
+        logging.error(f"Error converting pointcloud string to array: {e}")
         return None
 
-def format_pointcloud_array(points_array, precision=10):
-    """Format a numpy array of points back to a string with specified precision."""
-    if points_array is None or len(points_array) == 0:
-        return ""
+def pointcloud_array_to_string(points_array, precision=10):
+    """
+    Convert a numpy array of points to a formatted string.
+    
+    Args:
+        points_array (np.ndarray): Array of shape (n,2) containing x,y coordinates
+        precision (int): Number of decimal places to include in the output
         
-    format_str = f"{{:.{precision}f}} {{:.{precision}f}}"
-    return "\n".join(format_str.format(x, y) for x, y in points_array)
-
-# Default configuration for the pointcloud fixer
-DEFAULT_FIXER_CONFIG = {
-    "precision": 10,
-    "normalize": True,
-    "remove_duplicates": True,
-    "sort_points": True,
-    "interpolate_points": False,
-    "num_points": 100
-}
-
-def fix_pointcloud(points_array, config=None):
-    """Fix issues with a pointcloud array."""
-    if points_array is None or len(points_array) == 0:
-        return None
-        
-    # Use default config if none provided
-    if config is None:
-        config = DEFAULT_FIXER_CONFIG
-        
+    Returns:
+        str: Formatted string with one x,y coordinate pair per line,
+             or None if conversion failed
+    """
     try:
-        # Apply fixes based on configuration
-        result = points_array.copy()
+        if points_array is None or not isinstance(points_array, np.ndarray):
+            logging.error("Invalid points array provided")
+            return None
         
-        # Remove duplicates if configured
-        if config.get("remove_duplicates", True):
-            result = np.unique(result, axis=0)
-            
-        # Normalize if configured
-        if config.get("normalize", True):
-            from airfoil_database.xfoil.fix_airfoil_data import normalize_pointcloud
-            result = normalize_pointcloud(result)
-            
-        # Sort points if configured
-        if config.get("sort_points", True):
-            # Sort by x-coordinate
-            result = result[result[:, 0].argsort()]
-            
-        # Interpolate if configured
-        if config.get("interpolate_points", False):
-            from airfoil_database.xfoil.interpolate_points import interpolate_points
-            num_points = config.get("num_points", 100)
-            result = interpolate_points(result, num_points=num_points)
-            
-        return result
+        if points_array.size == 0 or points_array.shape[1] != 2:
+            logging.error(f"Invalid points array shape: {points_array.shape}")
+            return None
+        
+        # Format each point to a string with specified precision
+        formatted_lines = []
+        for point in points_array:
+            x, y = point
+            formatted_lines.append(f"{x:.{precision}f} {y:.{precision}f}")
+        
+        # Join lines with newline characters
+        return '\n'.join(formatted_lines)
+        
     except Exception as e:
-        logging.error(f"Error fixing pointcloud: {e}")
+        logging.error(f"Error converting points array to string: {e}")
         return None
+
+# Example usage
+if __name__ == "__main__":
+    # Example pointcloud string
+    example_str = """
+    0.0 0.0
+    0.25 0.1
+    0.5 0.15
+    0.75 0.1
+    1.0 0.0
+    0.75 -0.1
+    0.5 -0.15
+    0.25 -0.1
+    0.0 0.0
+    """
+    
+    # Convert string to array
+    points_array = pointcloud_string_to_array(example_str)
+    print("Converted to array:")
+    print(points_array)
+    
+    # Convert array back to string
+    if points_array is not None:
+        points_str = pointcloud_array_to_string(points_array, precision=6)
+        print("\nConverted back to string:")
+        print(points_str)

@@ -1,15 +1,9 @@
 from airfoil_database.utilities.helpers import (
-    _pointcloud_to_numpy,
-    parse_pointcloud_string,
-    format_pointcloud_array,
-    fix_pointcloud,
-    DEFAULT_FIXER_CONFIG
+    pointcloud_string_to_array,
+    pointcloud_array_to_string
 )
 
 __all__ = [
-    '_pointcloud_to_numpy',
-    'parse_pointcloud_string',
-    'format_pointcloud_array',
-    'fix_pointcloud',
-    'DEFAULT_FIXER_CONFIG'
+    pointcloud_string_to_array,
+    pointcloud_array_to_string
 ]

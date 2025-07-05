@@ -9,10 +9,12 @@ import numpy as np
 from sqlmodel import Session
 
 # --- Import from refactored code ---
-from airfoil_database import AirfoilDatabase, Airfoil, AirfoilSeries # Core
-from airfoil_database import PointcloudProcessor # XFoil
-#from airfoil_database.utilities.web.custom_parser import parse_file # Utilities web
-from airfoil_database.utils.helpers import DEFAULT_FIXER_CONFIG # Utilities
+from airfoil_database.core.database import AirfoilDatabase
+from airfoil_database.core.models import Airfoil, AeroCoeff, AirfoilGeometry
+from airfoil_database.classes.AirfoilSeries import AirfoilSeries
+from airfoil_database.xfoil.processor import PointcloudProcessor
+from airfoil_database.xfoil.fix_point_cloud import DEFAULT_FIXER_CONFIG
+from airfoil_database.utilities.web.custom_parser import parse_file, validate_pointcloud
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -114,30 +116,60 @@ def download_all_files_concurrently(urls, save_dir, max_workers=10):
     logging.info(f"Finished downloading. Successfully downloaded {len(downloaded_files)} files.")
     return downloaded_files
 
+def format_pointcloud_array(points_array, precision=10):
+    """Format a numpy array of points back to a string with specified precision."""
+    try:
+        if points_array is None or len(points_array) == 0:
+            return None
+        
+        # Format each point to a string with specified precision
+        formatted_lines = []
+        for point in points_array:
+            x, y = point
+            formatted_lines.append(f"{x:.{precision}f} {y:.{precision}f}")
+        
+        # Join lines with newline characters
+        return '\n'.join(formatted_lines)
+    except Exception as e:
+        logging.error(f"Error formatting pointcloud array: {e}")
+        return None
+
 # --- Parsing Worker ---
 def parse_file_worker(filepath):
-    """Parses a single .dat file using the PointcloudProcessor."""
+    """Parses a single .dat file using the custom parser."""
     try:
-        # Read the contents of the file
-        with open(filepath, 'r') as f:
-            pointcloud_str = f.read()
+        # Use the custom parser to read the file
+        pointcloud_array = parse_file(filepath)
         
-        # Fix point cloud using the PointcloudProcessor
-        points_array = PointcloudProcessor.fix_airfoil_pointcloud(
-            name=os.path.basename(filepath),  # Use filename as name for now
-            pointcloud_str=pointcloud_str,
-            config=DEFAULT_FIXER_CONFIG
-        )
-
-        if points_array is None:
-            logging.warning(f"Could not fix points from file: {filepath}")
-            return None  # Skip files that fail parsing
+        # Validate the parsed pointcloud
+        if not validate_pointcloud(pointcloud_array):
+            logging.warning(f"Pointcloud validation failed for: {filepath}")
+            return None  # Skip files that fail validation
 
         # Derive name from filename
         base_name = os.path.splitext(os.path.basename(filepath))[0]
 
-        # Format points back to string for DB storage
-        pointcloud_str = format_pointcloud_array(points_array, DEFAULT_FIXER_CONFIG.get('precision', 10))
+        # Apply additional processing if needed using PointcloudProcessor
+        try:
+            # Convert pointcloud_array to string format for processing
+            pointcloud_str = format_pointcloud_array(pointcloud_array)
+            
+            # Process the pointcloud if needed
+            processed_points_array = PointcloudProcessor.fix_airfoil_pointcloud(
+                name=base_name,
+                pointcloud_str=pointcloud_str,
+                config=DEFAULT_FIXER_CONFIG
+            )
+            
+            # Use processed points if available, otherwise use original
+            if processed_points_array is not None:
+                pointcloud_array = processed_points_array
+        except Exception as process_err:
+            logging.warning(f"Error during additional processing for {filepath}: {process_err}")
+            # Continue with the original parsed pointcloud
+
+        # Format points to string for DB storage
+        pointcloud_str = format_pointcloud_array(pointcloud_array, DEFAULT_FIXER_CONFIG.get('precision', 10))
         if not pointcloud_str:
             logging.warning(f"Formatting parsed points failed for: {filepath}")
             return None
@@ -174,7 +206,7 @@ def parse_all_files_concurrently(filepaths, max_workers=None):
             filepath = future_to_filepath[future]
             try:
                 parsed_data = future.result()
-                if parsed_data
+                if parsed_data:
                     parsed_data_list.append(parsed_data)
             except Exception as exc:
                 logging.error(f"File {filepath} generated an exception during parsing task: {exc}", exc_info=True)
@@ -208,7 +240,7 @@ def download_and_store_airfoils(start_url,
 
     # 3. Parse all downloaded files concurrently
     parsed_airfoil_data = parse_all_files_concurrently(downloaded_filepaths, max_parse_workers)
-    if not parsed_airfoil_data
+    if not parsed_airfoil_data:
         logging.error("No files were successfully parsed. Exiting.")
         return
 
@@ -227,15 +259,14 @@ def download_and_store_airfoils(start_url,
         logging.info("Attempting to store individually (slower)...")
         success_count = 0
 
-        for data in parsed_airfoil_data
+        for data in parsed_airfoil_data:
             try:
-                # No need to convert AirfoilSeries if it's already a value
                 # Store individual airfoil
                 airfoil_db.store_airfoil_data(
                     name=data['name'],
                     description=data['description'],
                     pointcloud=data['pointcloud'],
-                    airfoil_series=AirfoilSeries(data['airfoil_series']),  # Convert to AirfoilSeries enum
+                    airfoil_series=AirfoilSeries.from_string(data['airfoil_series']),
                     source=data['source'],
                     overwrite=overwrite
                 )
@@ -244,10 +275,7 @@ def download_and_store_airfoils(start_url,
                 logging.error(f"Failed to store airfoil {data.get('name', 'N/A')} individually: {store_err}")
 
         logging.info(f"Successfully stored data for {success_count} airfoils individually.")
-    finally:
-        # Close the database connection
-        airfoil_db.close()
-
+    
     logging.info("Finished processing all .dat files.")
 
 # --- Entry Point ---

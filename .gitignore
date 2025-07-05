@@ -1,7 +1,42 @@
+# Byte-compiled / optimized / compiled files
+__pycache__/
+*.pyc
+*.pyd
+*.pyo
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+env/
+venv/
+build/
+develop-eggs/
+dist/
+eggs/
+*.egg-info
+
+# Testing
+.pytest_cache/
+.coverage
+
+# Editors
+.idea/
+.vscode/
+*.swp
+*.bak
+*.swo
+
+# Project-specific files
+.env
+.DS_Store
+
 .env
 .venv
 __pycache__
 *\__pycache__
 src7airfoil_database.egg-info/*
+.egg-info/
 airfoil_dat_files/
 my_airfoil_database/

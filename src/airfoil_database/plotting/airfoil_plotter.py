@@ -6,7 +6,7 @@ import logging
 from sqlmodel import Session, select
 
 from airfoil_database.core.models import Airfoil
-from airfoil_database.utils.helpers import _pointcloud_to_numpy
+from airfoil_database.utilities.helpers import pointcloud_string_to_array
 
 class AirfoilPlotter:
     def __init__(self, database):
@@ -35,7 +35,7 @@ class AirfoilPlotter:
         data = self.db.get_airfoil_data(name)
         if data:
             description, pointcloud_str, series, source = data
-            pointcloud_np = _pointcloud_to_numpy(pointcloud_str)
+            pointcloud_np = pointcloud_string_to_array(pointcloud_str)
             x = pointcloud_np[:,0]
             y = pointcloud_np[:,1]
 

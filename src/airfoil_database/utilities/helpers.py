@@ -51,6 +51,22 @@ def pointcloud_string_to_array(pointcloud_str, min_points=3):
     except Exception as e:
         logging.error(f"Error converting pointcloud string to array: {e}")
         return None
+    
+def pointcloud_string_to_array_optimized(pointcloud_str):
+    """Optimized version of pointcloud string to numpy array conversion."""
+    if not pointcloud_str:
+        return np.array([])
+    
+    rows = [row for row in pointcloud_str.split('\n') if row.strip()]
+    
+    # Pre-allocate the array
+    points = np.zeros((len(rows), 2))
+    
+    for i, row in enumerate(rows):
+        points[i] = np.fromstring(row, sep=' ')
+    
+    return points
+
 
 def pointcloud_array_to_string(points_array, precision=10):
     """

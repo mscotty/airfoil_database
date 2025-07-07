@@ -362,3 +362,55 @@ class AirfoilDatabase:
         except Exception as e:
             print(f"An error occurred: {e}")
             return pd.DataFrame()  # Return empty dataframe on error.
+
+    def store_aero_coeffs(self, name, reynolds_number, mach, ncrit, alpha, cl, cd, cm):
+        """
+        Stores aerodynamic coefficients in the database.
+        
+        Args:
+            name (str): Airfoil name
+            reynolds_number (float): Reynolds number
+            mach (float): Mach number
+            ncrit (float): Transition criterion
+            alpha (float): Angle of attack
+            cl (float): Lift coefficient
+            cd (float): Drag coefficient
+            cm (float): Moment coefficient
+        """
+        try:
+            with Session(self.engine) as session:
+                # Check if record already exists
+                statement = select(AeroCoeff).where(
+                    (AeroCoeff.name == name) & 
+                    (AeroCoeff.reynolds_number == reynolds_number) & 
+                    (AeroCoeff.mach == mach) & 
+                    (AeroCoeff.alpha == alpha)
+                )
+                existing_coeff = session.exec(statement).first()
+                
+                if existing_coeff:
+                    # Update existing record
+                    existing_coeff.ncrit = ncrit
+                    existing_coeff.cl = cl
+                    existing_coeff.cd = cd
+                    existing_coeff.cm = cm
+                    session.add(existing_coeff)
+                else:
+                    # Create new record
+                    aero_coeff = AeroCoeff(
+                        name=name,
+                        reynolds_number=reynolds_number,
+                        mach=mach,
+                        ncrit=ncrit,
+                        alpha=alpha,
+                        cl=cl,
+                        cd=cd,
+                        cm=cm
+                    )
+                    session.add(aero_coeff)
+                
+                session.commit()
+                logging.debug(f"Stored coeffs for {name}: Re={reynolds_number}, M={mach}, α={alpha}, Cl={cl}, Cd={cd}, Cm={cm}")
+        except Exception as e:
+            logging.error(f"Error storing aero coeffs for {name} Re={reynolds_number} M={mach} A={alpha}: {e}")
+

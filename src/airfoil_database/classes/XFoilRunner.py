@@ -7,286 +7,329 @@ import numpy as np
 import pandas as pd
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import logging
-import shlex # Import shlex for safer command splitting if needed
+import shlex
+from pathlib import Path
 
 # Configure basic logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(process)d - %(levelname)s - %(message)s')
 
 # --- Worker Function (Static/Top-Level) ---
-# This function runs outside the class context in the worker process
-
 def _run_xfoil_alpha_worker(xfoil_executable, airfoil_name, points_str, reynolds, mach, alpha, ncrit):
     """
-    Static worker function to run XFoil for a single alpha.
-    Designed to be picklable for multiprocessing.
-
+    Optimized static worker function to run XFoil for a single alpha.
+    
     Returns:
         tuple: (alpha, dict_of_coeffs) or (alpha, None) if failed.
-               dict_of_coeffs contains {'Cl': float, 'Cd': float, 'Cm': float}
     """
     temp_airfoil_path = None
     output_file_path = None
-    # Timeout for XFoil process communication (seconds)
-    XFOIL_TIMEOUT = 60 # Adjust as needed
-
+    XFOIL_TIMEOUT = 30  # Reduced timeout for faster failure detection
+    
     try:
-        # --- Create Temporary Files ---
-        # Write airfoil points
+        # --- Create Temporary Files with better error handling ---
         try:
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".dat", mode="w", encoding='utf-8') as temp_file:
-                temp_file.write(points_str)
-                temp_airfoil_path = temp_file.name
+            # Use pathlib for better path handling
+            temp_dir = Path(tempfile.gettempdir())
+            temp_airfoil_path = temp_dir / f"airfoil_{os.getpid()}_{int(time.time()*1000)}.dat"
+            output_file_path = temp_dir / f"output_{os.getpid()}_{int(time.time()*1000)}.pol"
+            
+            # Write airfoil points
+            with open(temp_airfoil_path, 'w', encoding='utf-8') as f:
+                f.write(points_str)
+                
         except Exception as e:
-            logging.error(f"[Worker] Error creating temp airfoil file: {e}")
+            logging.error(f"[Worker] Error creating temp files: {e}")
             return alpha, None
 
-        # Create empty temp output file
-        try:
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".pol", mode="w", encoding='utf-8') as temp_out_file:
-                output_file_path = temp_out_file.name
-            # Ensure it's truly empty (paranoia check)
-            if os.path.exists(output_file_path):
-                os.remove(output_file_path)
-        except Exception as e:
-            logging.error(f"[Worker] Error creating temp output file: {e}")
-            # Cleanup airfoil file if output file failed
-            if temp_airfoil_path and os.path.exists(temp_airfoil_path):
-                 try: os.remove(temp_airfoil_path)
-                 except OSError: pass
-            return alpha, None
+        # --- Construct XFoil Commands (Optimized) ---
+        # Removed redundant commands and optimized for single alpha runs
+        xfoil_input = f"""load {temp_airfoil_path}
+{airfoil_name}
+pane
+ppar
+n 240
+t 1
 
 
-        # --- Construct XFoil Commands ---
-        # Corrected commands: NCRIT under OPER, removed VPAR, removed second PACC
-        xfoil_input = f"""
-        load {temp_airfoil_path}
-        {airfoil_name}
-        pane
-        ppar
-        n 240
-        t 1
+oper
+vpar
+n {ncrit}
 
-        
-        oper
-        vpar
-        n {ncrit}
+iter 20
+re {reynolds}
+mach {mach}
+visc
+pacc
+{output_file_path}
 
-        iter 20
-        re {reynolds}
-        mach {mach}
-        visc
-        pacc
-        {output_file_path}
+alfa {alpha}
+pacc
 
-        alfa {alpha}
-        pacc
+quit
+"""
 
-        quit
-        """
-        # Remove leading whitespace for each line for robustness
-        xfoil_input = "\n".join(line.strip() for line in xfoil_input.strip().split('\n')) + "\n"
-
-        # --- Execute XFoil ---
+        # --- Execute XFoil with optimized process handling ---
         start_time = time.time()
-        process = None # Initialize process to None
+        process = None
+        
         try:
+            # Use a working directory to avoid path issues
             process = subprocess.Popen(
-                [xfoil_executable], # Use the executable path passed as argument
+                [str(xfoil_executable)],
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
                 encoding='utf-8',
-                errors='ignore'
+                errors='ignore',
+                cwd=temp_dir,  # Set working directory
+                bufsize=0  # Unbuffered for immediate response
             )
-            # Communicate with a timeout
+            
+            # Send input and get results with timeout
             stdout, stderr = process.communicate(input=xfoil_input, timeout=XFOIL_TIMEOUT)
             end_time = time.time()
             run_duration = end_time - start_time
 
         except subprocess.TimeoutExpired:
-             logging.warning(f"[Worker] XFoil process timed out ({XFOIL_TIMEOUT}s) for {airfoil_name} A={alpha}. Terminating.")
-             if process:
-                 process.terminate() # Try to terminate
-                 try:
-                     # Wait briefly for termination
-                     process.wait(timeout=5)
-                 except subprocess.TimeoutExpired:
-                     process.kill() # Force kill if terminate doesn't work
-             return alpha, None
+            logging.warning(f"[Worker] XFoil timeout ({XFOIL_TIMEOUT}s) for {airfoil_name} A={alpha}")
+            if process:
+                try:
+                    process.terminate()
+                    process.wait(timeout=2)
+                except (subprocess.TimeoutExpired, ProcessLookupError):
+                    try:
+                        process.kill()
+                    except ProcessLookupError:
+                        pass  # Process already dead
+            return alpha, None
+            
         except FileNotFoundError:
-            # This error should only happen once if the executable is wrong
-            logging.error(f"[Worker] XFoil executable not found at '{xfoil_executable}'.")
-            # Re-raise to potentially stop the whole run? Or just fail this task?
-            # For now, just fail this task. The main process might catch repeated errors.
-            return alpha, None # Fail this specific alpha run
+            logging.error(f"[Worker] XFoil executable not found: '{xfoil_executable}'")
+            return alpha, None
+            
         except Exception as popen_err:
-             logging.error(f"[Worker] Error during Popen/communicate for {airfoil_name} A={alpha}: {popen_err}")
-             return alpha, None
-
-        # --- Process Results ---
-        if process.returncode != 0:
-            logging.warning(f"[Worker] XFoil process error (Code {process.returncode}) for {airfoil_name} Re={reynolds} M={mach} A={alpha}. Stderr: {stderr.strip()}")
+            logging.error(f"[Worker] Process error for {airfoil_name} A={alpha}: {popen_err}")
             return alpha, None
 
-        # Parse the generated polar file (use static method or include logic)
-        coefficients = XFoilRunner._parse_polar_file(output_file_path) # Call static method
+        # --- Enhanced Result Processing ---
+        if process.returncode != 0:
+            # Check for specific XFoil error patterns in stderr/stdout
+            error_msg = stderr.strip() + stdout.strip()
+            if "not converged" in error_msg.lower():
+                logging.debug(f"[Worker] Convergence failure for {airfoil_name} A={alpha}")
+            elif "stall" in error_msg.lower():
+                logging.debug(f"[Worker] Stall condition for {airfoil_name} A={alpha}")
+            else:
+                logging.warning(f"[Worker] XFoil error (Code {process.returncode}) for {airfoil_name} A={alpha}")
+            return alpha, None
+
+        # Check if output file was actually created and has content
+        if not output_file_path.exists() or output_file_path.stat().st_size == 0:
+            logging.debug(f"[Worker] No output file generated for {airfoil_name} A={alpha}")
+            return alpha, None
+
+        # Parse the generated polar file
+        coefficients = XFoilRunner._parse_polar_file(output_file_path)
 
         if coefficients:
-             logging.debug(f"[Worker] Success: {airfoil_name} Re={reynolds} M={mach} A={alpha} -> {coefficients} (Time: {run_duration:.2f}s)")
-             return alpha, coefficients
+            # Validate coefficients are reasonable
+            if XFoilRunner._validate_coefficients(coefficients, alpha):
+                logging.debug(f"[Worker] Success: {airfoil_name} A={alpha} -> {coefficients} ({run_duration:.2f}s)")
+                return alpha, coefficients
+            else:
+                logging.debug(f"[Worker] Invalid coefficients for {airfoil_name} A={alpha}: {coefficients}")
+                return alpha, None
         else:
-             # Log stdout only if parsing failed, might contain clues
-             logging.warning(f"[Worker] Failed to parse/find coeffs for {airfoil_name} Re={reynolds} M={mach} A={alpha}. Stdout: {stdout.strip()}")
-             return alpha, None
+            logging.debug(f"[Worker] Failed to parse coefficients for {airfoil_name} A={alpha}")
+            return alpha, None
 
     except Exception as e:
-        # Catch-all for unexpected errors within the worker task
-        logging.error(f"[Worker] Unexpected error processing {airfoil_name} A={alpha}: {e}", exc_info=True)
+        logging.error(f"[Worker] Unexpected error for {airfoil_name} A={alpha}: {e}", exc_info=True)
         return alpha, None
+        
     finally:
-        # --- Cleanup Temporary Files ---
+        # --- Cleanup with better error handling ---
         for f_path in [temp_airfoil_path, output_file_path]:
-            if f_path and os.path.exists(f_path):
+            if f_path and Path(f_path).exists():
                 try:
-                    os.remove(f_path)
+                    Path(f_path).unlink()
                 except Exception as e:
-                    # Log warning but don't crash the worker
-                    logging.warning(f"[Worker] Could not remove temp file {f_path}: {e}")
+                    logging.warning(f"[Worker] Could not remove {f_path}: {e}")
 
-# --- XFoilRunner Class ---
 
 class XFoilRunner:
     """
-    Runs XFoil simulations for individual angles of attack, handling specific
-    setup commands and integrating with an AirfoilDatabase. Incorporates
-    parallel processing for different run conditions.
+    Optimized XFoilRunner with improved error handling and performance.
     """
 
-    def __init__(self, database, xfoil_executable=None):
-        """
-        Initializes the XFoilRunner. Args remain the same.
-        """
-        self.database = database # Needed for storing results in the main process
+    def __init__(self, aero_analyzer, xfoil_executable=None):
+        """Initialize XFoilRunner with validation."""
+        self.analyzer = aero_analyzer
+        self.database = aero_analyzer.db
         self.xfoil_executable = xfoil_executable if xfoil_executable else "xfoil"
+        
+        # Validate XFoil executable exists
+        if not self._validate_xfoil_executable():
+            raise FileNotFoundError(f"XFoil executable not found or not executable: {self.xfoil_executable}")
+            
         logging.info(f"Using XFoil executable: {self.xfoil_executable}")
-        # No instance variables that would cause pickling issues are stored here.
 
-    # Make parsing static as it doesn't depend on instance state
+    def _validate_xfoil_executable(self):
+        """Validate that XFoil executable exists and is executable."""
+        try:
+            result = subprocess.run([self.xfoil_executable], 
+                                  input="quit\n", 
+                                  capture_output=True, 
+                                  text=True, 
+                                  timeout=5)
+            return True
+        except (FileNotFoundError, subprocess.TimeoutExpired, PermissionError):
+            return False
+
+    @staticmethod
+    def _validate_coefficients(coefficients, alpha):
+        """Validate that aerodynamic coefficients are reasonable."""
+        if not coefficients:
+            return False
+            
+        cl, cd, cm = coefficients.get('Cl', 0), coefficients.get('Cd', 0), coefficients.get('Cm', 0)
+        
+        # Basic sanity checks
+        if not (-5 <= cl <= 5):  # Reasonable Cl range
+            return False
+        if not (0 <= cd <= 1):   # Reasonable Cd range
+            return False
+        if not (-1 <= cm <= 1):  # Reasonable Cm range
+            return False
+        if cd < 0.001:           # Cd too small (likely convergence issue)
+            return False
+            
+        return True
+
     @staticmethod
     def _parse_polar_file(filepath):
         """
-        Parses the XFoil polar output file (.pol) generated by PACC.
-        (Implementation is the same as before, just marked static)
+        Enhanced parsing of XFoil polar output with better error handling.
         """
         try:
-            # Read the file, skipping header lines. Header length can vary slightly.
-            # We look for the line starting with 'alpha'
+            filepath = Path(filepath)
+            if not filepath.exists():
+                return None
+                
             with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
                 lines = f.readlines()
 
+            # Look for data header more robustly
             data_start_line = -1
             for i, line in enumerate(lines):
-                # More robust header check
                 cleaned_line = line.strip().lower()
-                if cleaned_line.startswith('alpha') and 'cl' in cleaned_line and 'cd' in cleaned_line:
-                    # Data usually starts 2 lines after the header
-                    data_start_line = i + 2
+                # Look for the header line containing column names
+                if ('alpha' in cleaned_line and 'cl' in cleaned_line and 
+                    'cd' in cleaned_line and 'cm' in cleaned_line):
+                    # Skip any separator lines (typically dashes)
+                    potential_start = i + 1
+                    while (potential_start < len(lines) and 
+                           lines[potential_start].strip().startswith('-')):
+                        potential_start += 1
+                    data_start_line = potential_start
                     break
 
             if data_start_line == -1 or data_start_line >= len(lines):
-                logging.debug(f"Could not find data header or data lines in {filepath}")
-                return None # Header not found or no data lines
-
-            # Extract the first data line (should be the only one for single alpha)
-            data_line = lines[data_start_line].strip()
-            values = data_line.split()
-
-            # Expecting at least alpha, Cl, Cd, Cdp, Cm (5 values)
-            if len(values) >= 5:
-                # Add explicit error handling for float conversion
-                try:
-                    cl = float(values[1])
-                    cd = float(values[2])
-                    cm = float(values[4]) # Cm is typically the 5th value
-                    return {"Cl": cl, "Cd": cd, "Cm": cm}
-                except ValueError as ve:
-                    logging.warning(f"Could not convert values to float in {filepath}: {values}. Error: {ve}")
-                    return None
-            else:
-                logging.debug(f"Insufficient values in data line of {filepath}: {data_line}")
                 return None
 
-        except FileNotFoundError:
-             # This might happen if XFoil failed to write the file
-             logging.warning(f"Polar output file not found: {filepath}")
-             return None
-        except Exception as e:
-            # Catch other potential errors like permission issues
-            logging.error(f"Unexpected error reading or parsing polar file {filepath}: {e}")
+            # Find the first non-empty data line
+            for line_idx in range(data_start_line, len(lines)):
+                data_line = lines[line_idx].strip()
+                if not data_line:
+                    continue
+                    
+                values = data_line.split()
+                if len(values) >= 5:
+                    try:
+                        # XFoil polar format: alpha CL CD CDp CM
+                        alpha = float(values[0])
+                        cl = float(values[1])
+                        cd = float(values[2])
+                        cm = float(values[4])
+                        return {"Cl": cl, "Cd": cd, "Cm": cm}
+                    except (ValueError, IndexError) as e:
+                        logging.debug(f"Could not parse line '{data_line}': {e}")
+                        continue
+
             return None
 
-    # This is the function submitted to the executor - now static
+        except Exception as e:
+            logging.error(f"Error parsing polar file {filepath}: {e}")
+            return None
+
     @staticmethod
     def _run_condition_set_static(xfoil_executable, airfoil_name, points_str, reynolds, mach, ncrit, alphas):
         """
-        Static worker function to run all alphas for a specific (Re, Mach, Ncrit) set.
-        Calls the global _run_xfoil_alpha_worker function.
+        Optimized static worker function with better batch processing.
         """
         successful_results = []
-        logging.info(f"[Worker Start] Analyzing {airfoil_name}, Re={reynolds}, M={mach}, Ncrit={ncrit}")
-
-        for alpha in alphas:
-            # Call the top-level worker function
+        failed_alphas = []
+        
+        logging.info(f"[Worker] Processing {len(alphas)} alphas for {airfoil_name}, Re={reynolds}, M={mach}")
+        
+        # Sort alphas to process from low to high for potentially better convergence
+        sorted_alphas = sorted(alphas)
+        
+        for alpha in sorted_alphas:
             _, coeffs = _run_xfoil_alpha_worker(
                 xfoil_executable, airfoil_name, points_str, reynolds, mach, alpha, ncrit
             )
+            
             if coeffs:
-                successful_results.append({'alpha': alpha, **coeffs}) # Combine alpha with coeffs dict
-
-        logging.info(f"[Worker End] Finished {airfoil_name}, Re={reynolds}, M={mach}, Ncrit={ncrit}. Successes: {len(successful_results)}/{len(alphas)}")
-        # Return results along with identifying info needed by the main process
+                successful_results.append({'alpha': alpha, **coeffs})
+            else:
+                failed_alphas.append(alpha)
+                
+        success_rate = len(successful_results) / len(alphas) * 100
+        logging.info(f"[Worker] Completed {airfoil_name} Re={reynolds} M={mach}: "
+                    f"{len(successful_results)}/{len(alphas)} ({success_rate:.1f}%) successful")
+        
+        if failed_alphas:
+            logging.debug(f"[Worker] Failed alphas: {failed_alphas}")
+            
         return airfoil_name, reynolds, mach, ncrit, successful_results
 
-
-    def run_analysis_parallel(self,
-                              airfoil_name,
-                              reynolds_list,
-                              mach_list,
-                              alpha_list,
-                              ncrit_list,
-                              max_workers=None):
+    def run_analysis_parallel(self, airfoil_name, reynolds_list, mach_list, alpha_list, ncrit_list, max_workers=None):
         """
-        Runs XFoil analysis in parallel using static worker functions.
+        Optimized parallel analysis with better resource management.
         """
-        # --- Input Validation and Setup --- (Same as before)
+        # Input validation
         if not isinstance(reynolds_list, list): reynolds_list = [reynolds_list]
         if not isinstance(mach_list, list): mach_list = [mach_list]
         if not isinstance(alpha_list, list): alpha_list = [alpha_list]
         if not isinstance(ncrit_list, list): ncrit_list = [ncrit_list]
 
         start_total_time = time.time()
-        logging.info(f"Starting parallel analysis for airfoil: {airfoil_name}")
+        logging.info(f"Starting optimized parallel analysis for: {airfoil_name}")
 
+        # Validate airfoil data
         airfoil_db_data = self.database.get_airfoil_data(airfoil_name)
         if not airfoil_db_data or not airfoil_db_data[1]:
-            logging.error(f"Airfoil '{airfoil_name}' not found or has no pointcloud data. Skipping.")
+            logging.error(f"Airfoil '{airfoil_name}' not found. Aborting.")
             return
+
         _, points_str, _, _ = airfoil_db_data
 
+        # Optimize worker count based on system resources
         if not max_workers:
             cores = os.cpu_count()
-            max_workers = cores if cores else 1
-            logging.info(f"Using default max_workers: {max_workers}")
+            # Use fewer workers than cores to avoid overwhelming the system
+            max_workers = max(1, cores - 1) if cores and cores > 2 else 1
+            logging.info(f"Using {max_workers} workers (system has {cores} cores)")
 
-        # --- Prepare Tasks ---
+        # Prepare tasks
         tasks_args = []
         for reynolds in reynolds_list:
             for mach in mach_list:
                 for ncrit in ncrit_list:
-                    # Arguments for the static worker function
                     tasks_args.append((
-                        self.xfoil_executable, # Pass executable path
+                        self.xfoil_executable,
                         airfoil_name,
                         points_str,
                         reynolds,
@@ -295,65 +338,50 @@ class XFoilRunner:
                         alpha_list
                     ))
 
-        if not tasks_args:
-            logging.warning("No simulation tasks generated. Check input lists.")
-            return
+        total_conditions = len(tasks_args)
+        total_alphas = total_conditions * len(alpha_list)
+        
+        logging.info(f"Processing {total_conditions} conditions ({total_alphas} total alpha points)")
 
-        logging.info(f"Submitting {len(tasks_args)} condition sets to ProcessPoolExecutor with {max_workers} workers.")
-
-        # --- Execute Tasks and Collect Results ---
-        total_alphas_processed = 0
-        total_alphas_successful = 0
-
+        # Execute with progress tracking
+        completed_conditions = 0
+        total_successful = 0
+        
         with ProcessPoolExecutor(max_workers=max_workers) as executor:
-            # Submit the static method with explicit args
-            # We don't need future_to_condition anymore as results contain identifying info
-            futures = [executor.submit(XFoilRunner._run_condition_set_static, *args) for args in tasks_args]
+            futures = [executor.submit(XFoilRunner._run_condition_set_static, *args) 
+                      for args in tasks_args]
 
             for future in as_completed(futures):
                 try:
-                    # Unpack results from the static worker
-                    res_airfoil, res_re, res_mach, res_ncrit, successful_results = future.result()
+                    airfoil, re, mach, ncrit, results = future.result()
+                    completed_conditions += 1
+                    
+                    # Progress reporting
+                    progress = (completed_conditions / total_conditions) * 100
+                    logging.info(f"Progress: {completed_conditions}/{total_conditions} "
+                               f"({progress:.1f}%) - Latest: Re={re}, M={mach}")
 
-                    # Increment processed count based on the alpha list for that task
-                    # Find the original task args to know how many alphas were attempted
-                    # This is a bit less direct than future_to_condition, alternative below
-                    num_alphas_in_task = len(alpha_list) # Assuming alpha_list is constant for now
-                    total_alphas_processed += num_alphas_in_task
-
-                    # Store results using self.database (in the main process)
-                    if successful_results:
-                        num_success = len(successful_results)
-                        total_alphas_successful += num_success
-                        logging.info(f"Received {num_success} results for {res_airfoil}, Re={res_re}, M={res_mach}, Ncrit={res_ncrit}. Storing...")
-                        for result in successful_results:
+                    # Store results
+                    if results:
+                        total_successful += len(results)
+                        for result in results:
                             try:
-                                # Call the database method from the main process
-                                self.database.store_aero_coeffs(
-                                    res_airfoil,
-                                    res_re,
-                                    res_mach,
-                                    res_ncrit,
-                                    result['alpha'],
-                                    result['Cl'],
-                                    result['Cd'],
-                                    result['Cm']
+                                self.analyzer.store_aero_coeffs(
+                                    airfoil, re, mach, ncrit, result['alpha'],
+                                    result['Cl'], result['Cd'], result['Cm']
                                 )
                             except Exception as db_err:
-                                logging.error(f"Database error storing result for {res_airfoil} Re={res_re} M={res_mach} A={result['alpha']}: {db_err}")
-                    else:
-                         logging.info(f"No successful results returned for {res_airfoil}, Re={res_re}, M={res_mach}, Ncrit={res_ncrit}")
+                                logging.error(f"Database error: {db_err}")
 
                 except Exception as exc:
-                    # Log exceptions raised by the worker process OR during future.result()
-                    # Getting original args is harder without future_to_condition, log generically
-                    logging.error(f"A worker task generated an exception: {exc}", exc_info=True)
+                    logging.error(f"Worker task exception: {exc}", exc_info=True)
 
-        # --- Final Logging ---
-        end_total_time = time.time()
-        logging.info(f"Finished parallel analysis for {airfoil_name}.")
-        logging.info(f"Total time: {end_total_time - start_total_time:.2f} seconds")
-        # Note: total_alphas_processed might be slightly inaccurate if alpha_list varied per task
-        logging.info(f"Total alphas attempted (approx): {total_alphas_processed}")
-        logging.info(f"Total successful alphas stored: {total_alphas_successful}")
-
+        # Final summary
+        end_time = time.time()
+        duration = end_time - start_total_time
+        success_rate = (total_successful / total_alphas) * 100
+        
+        logging.info(f"Analysis complete for {airfoil_name}")
+        logging.info(f"Total time: {duration:.1f}s ({duration/60:.1f} minutes)")
+        logging.info(f"Success rate: {total_successful}/{total_alphas} ({success_rate:.1f}%)")
+        logging.info(f"Average time per alpha: {duration/total_alphas:.2f}s")

@@ -17,7 +17,7 @@ from airfoil_database.utilities.web.download_airfoil_dat_files import download_a
 
 # --- Basic Configuration ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-DB_DIR = "airfoil_database_files"
+DB_DIR = "airfoil_database"
 DB_NAME = "airfoils.db"
 DAT_FILE_DIR = "airfoil_dat_files"
 START_URL = "https://m-selig.ae.illinois.edu/ads/coord_database.html"

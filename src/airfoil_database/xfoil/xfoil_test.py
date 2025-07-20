@@ -30,7 +30,7 @@ def main():
     airfoil_name = "naca2421"  # Make sure this airfoil exists in your database
     reynolds_list = [1e6]  # Reynolds number
     mach_list = [0.2]  # Mach number
-    alpha_list = [-5.0, -2.5, 0.0, 2.5, 5.0, 7.5, 10.0]  # Angles of attack
+    alpha_list = [-10, -7.5,-5.0, -2.5, 0.0, 2.5, 5.0, 7.5, 10.0]  # Angles of attack
     ncrit_list = [2.0]  # Ncrit parameter
     
     # Run the analysis

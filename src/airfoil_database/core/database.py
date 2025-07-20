@@ -413,4 +413,82 @@ class AirfoilDatabase:
                 logging.debug(f"Stored coeffs for {name}: Re={reynolds_number}, M={mach}, α={alpha}, Cl={cl}, Cd={cd}, Cm={cm}")
         except Exception as e:
             logging.error(f"Error storing aero coeffs for {name} Re={reynolds_number} M={mach} A={alpha}: {e}")
+    
+    # Add this method to your database.py AirfoilDatabase class
+
+    def find_missing_conditions(self, airfoil_names=None, reynolds_list=None, mach_list=None, alpha_list=None, ncrit_list=None):
+        """
+        Find missing aerodynamic coefficient conditions for airfoils.
+        
+        Args:
+            airfoil_names (list, optional): List of airfoil names to check. If None, checks all airfoils.
+            reynolds_list (list): List of Reynolds numbers
+            mach_list (list): List of Mach numbers  
+            alpha_list (list): List of angles of attack
+            ncrit_list (list): List of ncrit values
+            
+        Returns:
+            dict: Dictionary with airfoil names as keys and list of missing conditions as values
+        """
+        if not all([reynolds_list, mach_list, alpha_list, ncrit_list]):
+            logging.error("All condition lists must be provided")
+            return {}
+            
+        missing_conditions = {}
+        
+        try:
+            with Session(self.engine) as session:
+                # Get airfoil names to check
+                if airfoil_names is None:
+                    statement = select(Airfoil.name)
+                    airfoil_names = [row.name for row in session.exec(statement).all()]
+                
+                for airfoil_name in airfoil_names:
+                    # Check if airfoil exists
+                    airfoil_statement = select(Airfoil).where(Airfoil.name == airfoil_name)
+                    airfoil = session.exec(airfoil_statement).first()
+                    
+                    if not airfoil:
+                        logging.warning(f"Airfoil {airfoil_name} not found in database")
+                        continue
+                    
+                    # Get existing conditions for this airfoil
+                    existing_statement = select(
+                        AeroCoeff.reynolds_number,
+                        AeroCoeff.mach, 
+                        AeroCoeff.alpha,
+                        AeroCoeff.ncrit
+                    ).where(AeroCoeff.name == airfoil_name)
+                    
+                    existing_conditions = set()
+                    for row in session.exec(existing_statement).all():
+                        existing_conditions.add((row.reynolds_number, row.mach, row.alpha, row.ncrit))
+                    
+                    # Find missing conditions
+                    airfoil_missing = []
+                    for re in reynolds_list:
+                        for mach in mach_list:
+                            for alpha in alpha_list:
+                                for ncrit in ncrit_list:
+                                    condition = (re, mach, alpha, ncrit)
+                                    if condition not in existing_conditions:
+                                        airfoil_missing.append({
+                                            'reynolds': re,
+                                            'mach': mach,
+                                            'alpha': alpha,
+                                            'ncrit': ncrit
+                                        })
+                    
+                    if airfoil_missing:
+                        missing_conditions[airfoil_name] = airfoil_missing
+                        logging.info(f"Found {len(airfoil_missing)} missing conditions for {airfoil_name}")
+                    else:
+                        logging.info(f"All conditions exist for {airfoil_name}")
+        
+        except Exception as e:
+            logging.error(f"Error finding missing conditions: {e}")
+            return {}
+        
+        return missing_conditions
+
 

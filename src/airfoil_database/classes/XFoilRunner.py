@@ -9,6 +9,7 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 import logging
 import shlex
 from pathlib import Path
+from typing import List, Optional, Dict, Any
 
 # Configure basic logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(process)d - %(levelname)s - %(message)s')
@@ -385,3 +386,451 @@ class XFoilRunner:
         logging.info(f"Total time: {duration:.1f}s ({duration/60:.1f} minutes)")
         logging.info(f"Success rate: {total_successful}/{total_alphas} ({success_rate:.1f}%)")
         logging.info(f"Average time per alpha: {duration/total_alphas:.2f}s")
+    
+    # Add this method to your XFoilWorkflowManager class
+
+    def run_batch_analysis_threaded(self, reynolds_list: List[float], mach_list: List[float],
+                                alpha_list: List[float], ncrit_list: List[float],
+                                airfoil_names: Optional[List[str]] = None,
+                                max_workers: Optional[int] = None,
+                                skip_existing: bool = True,
+                                batch_size: Optional[int] = None) -> Dict[str, Any]:
+        """
+        Run batch analysis using threading instead of multiprocessing (Windows-safe).
+        """
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        import threading
+        
+        start_time = time.time()
+        logging.info("Starting threaded batch XFoil analysis")
+        
+        # Get airfoils to analyze
+        if airfoil_names is None:
+            airfoil_names = self._get_all_airfoil_names()
+        
+        if skip_existing:
+            missing_conditions = self.database.find_missing_conditions(
+                airfoil_names=airfoil_names,
+                reynolds_list=reynolds_list,
+                mach_list=mach_list,
+                alpha_list=alpha_list,
+                ncrit_list=ncrit_list
+            )
+            airfoils_to_process = list(missing_conditions.keys())
+        else:
+            airfoils_to_process = airfoil_names
+            missing_conditions = {}
+        
+        if not airfoils_to_process:
+            logging.info("No airfoils need processing")
+            return {
+                'total_airfoils': len(airfoil_names),
+                'processed_airfoils': 0,
+                'successful_airfoils': 0,
+                'failed_airfoils': 0,
+                'duration': time.time() - start_time
+            }
+        
+        successful_airfoils = []
+        failed_airfoils = []
+        
+        # Use threading instead of multiprocessing
+        max_workers = max_workers or min(4, len(airfoils_to_process))
+        
+        def process_single_airfoil(airfoil_name):
+            """Process a single airfoil using threading."""
+            try:
+                if missing_conditions and airfoil_name in missing_conditions:
+                    # Process missing conditions sequentially for this airfoil
+                    self._run_missing_conditions_sequential(
+                        airfoil_name, missing_conditions[airfoil_name]
+                    )
+                else:
+                    # Run all conditions sequentially
+                    self._run_airfoil_sequential(
+                        airfoil_name, reynolds_list, mach_list, alpha_list, ncrit_list
+                    )
+                return airfoil_name, True, None
+            except Exception as e:
+                return airfoil_name, False, str(e)
+        
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = [executor.submit(process_single_airfoil, airfoil_name) 
+                    for airfoil_name in airfoils_to_process]
+            
+            for i, future in enumerate(as_completed(futures), 1):
+                airfoil_name, success, error = future.result()
+                
+                if success:
+                    successful_airfoils.append(airfoil_name)
+                    logging.info(f"✓ Successfully completed {airfoil_name} ({i}/{len(airfoils_to_process)})")
+                else:
+                    failed_airfoils.append(airfoil_name)
+                    logging.error(f"✗ Failed to process {airfoil_name}: {error}")
+        
+        duration = time.time() - start_time
+        
+        return {
+            'total_airfoils': len(airfoils_to_process),
+            'processed_airfoils': len(successful_airfoils) + len(failed_airfoils),
+            'successful_airfoils': len(successful_airfoils),
+            'failed_airfoils': len(failed_airfoils),
+            'successful_list': successful_airfoils,
+            'failed_list': failed_airfoils,
+            'duration': duration
+        }
+
+    def _run_airfoil_sequential(self, airfoil_name: str, reynolds_list: List[float],
+                            mach_list: List[float], alpha_list: List[float],
+                            ncrit_list: List[float]):
+        """Run XFoil analysis for an airfoil sequentially (no multiprocessing)."""
+        airfoil_data = self.database.get_airfoil_data(airfoil_name)
+        if not airfoil_data or not airfoil_data[1]:
+            raise ValueError(f"No point cloud data for {airfoil_name}")
+        
+        points_str = airfoil_data[1]
+        
+        for reynolds in reynolds_list:
+            for mach in mach_list:
+                for ncrit in ncrit_list:
+                    for alpha in alpha_list:
+                        try:
+                            # Run XFoil for single condition
+                            _, coeffs = _run_xfoil_alpha_worker(
+                                self.xfoil_runner.xfoil_executable,
+                                airfoil_name, points_str, reynolds, mach, alpha, ncrit
+                            )
+                            
+                            if coeffs:
+                                self.analyzer.store_aero_coeffs(
+                                    airfoil_name, reynolds, mach, ncrit, alpha,
+                                    coeffs['Cl'], coeffs['Cd'], coeffs['Cm']
+                                )
+                        except Exception as e:
+                            logging.debug(f"Failed condition {airfoil_name} Re={reynolds} M={mach} A={alpha}: {e}")
+
+    def _run_missing_conditions_sequential(self, airfoil_name: str, missing_conditions: List[Dict]):
+        """Run missing conditions sequentially."""
+        airfoil_data = self.database.get_airfoil_data(airfoil_name)
+        if not airfoil_data or not airfoil_data[1]:
+            raise ValueError(f"No point cloud data for {airfoil_name}")
+        
+        points_str = airfoil_data[1]
+        
+        for condition in missing_conditions:
+            try:
+                _, coeffs = _run_xfoil_alpha_worker(
+                    self.xfoil_runner.xfoil_executable,
+                    airfoil_name, points_str,
+                    condition['reynolds'], condition['mach'],
+                    condition['alpha'], condition['ncrit']
+                )
+                
+                if coeffs:
+                    self.analyzer.store_aero_coeffs(
+                        airfoil_name,
+                        condition['reynolds'], condition['mach'], condition['ncrit'],
+                        condition['alpha'], coeffs['Cl'], coeffs['Cd'], coeffs['Cm']
+                    )
+            except Exception as e:
+                logging.debug(f"Failed condition {airfoil_name}: {e}")
+    
+    def run_batch_analysis_safe(self, reynolds_list: List[float], mach_list: List[float],
+                           alpha_list: List[float], ncrit_list: List[float],
+                           airfoil_names: Optional[List[str]] = None,
+                           max_workers: Optional[int] = None,
+                           skip_existing: bool = True,
+                           batch_size: Optional[int] = None,
+                           use_threading: bool = None) -> Dict[str, Any]:
+        """
+        Safe batch analysis that automatically chooses the best method for the platform.
+        """
+        import platform
+        
+        # Auto-detect best method
+        if use_threading is None:
+            use_threading = platform.system() == 'Windows'
+        
+        if use_threading:
+            return self._run_batch_analysis_threaded(
+                reynolds_list, mach_list, alpha_list, ncrit_list,
+                airfoil_names, max_workers, skip_existing, batch_size
+            )
+        else:
+            return self.run_batch_analysis(
+                reynolds_list, mach_list, alpha_list, ncrit_list,
+                airfoil_names, max_workers, skip_existing, batch_size
+            )
+
+    def _run_batch_analysis_threaded(self, reynolds_list: List[float], mach_list: List[float],
+                                    alpha_list: List[float], ncrit_list: List[float],
+                                    airfoil_names: Optional[List[str]] = None,
+                                    max_workers: Optional[int] = None,
+                                    skip_existing: bool = True,
+                                    batch_size: Optional[int] = None) -> Dict[str, Any]:
+        """
+        Threading-based batch analysis for Windows compatibility.
+        """
+        start_time = time.time()
+        logging.info("Starting threading-based batch XFoil analysis")
+        
+        # Get airfoils to analyze
+        if airfoil_names is None:
+            airfoil_names = self._get_all_airfoil_names()
+        
+        if skip_existing:
+            missing_conditions = self.database.find_missing_conditions(
+                airfoil_names=airfoil_names,
+                reynolds_list=reynolds_list,
+                mach_list=mach_list,
+                alpha_list=alpha_list,
+                ncrit_list=ncrit_list
+            )
+            airfoils_to_process = list(missing_conditions.keys())
+        else:
+            airfoils_to_process = airfoil_names
+            missing_conditions = {}
+        
+        if not airfoils_to_process:
+            logging.info("No airfoils need processing")
+            return {
+                'total_airfoils': len(airfoil_names),
+                'processed_airfoils': 0,
+                'successful_airfoils': 0,
+                'failed_airfoils': 0,
+                'duration': time.time() - start_time
+            }
+        
+        successful_airfoils = []
+        failed_airfoils = []
+        
+        # Use conservative threading for XFoil (it's I/O bound anyway)
+        max_workers = min(max_workers or 2, 4)  # Limit to 4 max for XFoil stability
+        
+        def process_single_airfoil(airfoil_name):
+            """Process a single airfoil using direct XFoil calls."""
+            thread_id = threading.get_ident()
+            logging.info(f"Thread {thread_id}: Processing {airfoil_name}")
+            
+            try:
+                if missing_conditions and airfoil_name in missing_conditions:
+                    success_count = self._run_missing_conditions_direct(
+                        airfoil_name, missing_conditions[airfoil_name]
+                    )
+                else:
+                    success_count = self._run_airfoil_conditions_direct(
+                        airfoil_name, reynolds_list, mach_list, alpha_list, ncrit_list
+                    )
+                
+                logging.info(f"Thread {thread_id}: Completed {airfoil_name} ({success_count} successful conditions)")
+                return airfoil_name, True, None, success_count
+                
+            except Exception as e:
+                logging.error(f"Thread {thread_id}: Failed {airfoil_name}: {e}")
+                return airfoil_name, False, str(e), 0
+        
+        # Process airfoils with threading
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = [executor.submit(process_single_airfoil, airfoil_name) 
+                    for airfoil_name in airfoils_to_process]
+            
+            for i, future in enumerate(as_completed(futures), 1):
+                airfoil_name, success, error, success_count = future.result()
+                
+                if success:
+                    successful_airfoils.append(airfoil_name)
+                    logging.info(f"✓ Completed {airfoil_name} ({i}/{len(airfoils_to_process)})")
+                else:
+                    failed_airfoils.append(airfoil_name)
+                    logging.error(f"✗ Failed {airfoil_name}: {error}")
+        
+        duration = time.time() - start_time
+        
+        return {
+            'total_airfoils': len(airfoils_to_process),
+            'processed_airfoils': len(successful_airfoils) + len(failed_airfoils),
+            'successful_airfoils': len(successful_airfoils),
+            'failed_airfoils': len(failed_airfoils),
+            'successful_list': successful_airfoils,
+            'failed_list': failed_airfoils,
+            'duration': duration
+        }
+
+    def _run_missing_conditions_direct(self, airfoil_name: str, missing_conditions: List[Dict]) -> int:
+        """Run missing conditions using direct XFoil calls (no multiprocessing)."""
+        airfoil_data = self.database.get_airfoil_data(airfoil_name)
+        if not airfoil_data or not airfoil_data[1]:
+            raise ValueError(f"No point cloud data for {airfoil_name}")
+        
+        points_str = airfoil_data[1]
+        success_count = 0
+        
+        logging.info(f"Processing {len(missing_conditions)} missing conditions for {airfoil_name}")
+        
+        for i, condition in enumerate(missing_conditions):
+            try:
+                # Use the direct worker function
+                alpha, coeffs = self._run_xfoil_single_condition(
+                    airfoil_name, points_str,
+                    condition['reynolds'], condition['mach'],
+                    condition['alpha'], condition['ncrit']
+                )
+                
+                if coeffs:
+                    self.analyzer.store_aero_coeffs(
+                        airfoil_name,
+                        condition['reynolds'], condition['mach'], condition['ncrit'],
+                        condition['alpha'], coeffs['Cl'], coeffs['Cd'], coeffs['Cm']
+                    )
+                    success_count += 1
+                    
+                # Add small delay to prevent overwhelming XFoil
+                time.sleep(0.1)
+                
+                if (i + 1) % 10 == 0:
+                    logging.info(f"  Progress: {i+1}/{len(missing_conditions)} conditions")
+                    
+            except Exception as e:
+                logging.debug(f"Failed condition {airfoil_name} A={condition['alpha']}: {e}")
+        
+        logging.info(f"Completed {airfoil_name}: {success_count}/{len(missing_conditions)} successful")
+        return success_count
+
+    def _run_airfoil_conditions_direct(self, airfoil_name: str, reynolds_list: List[float],
+                                    mach_list: List[float], alpha_list: List[float],
+                                    ncrit_list: List[float]) -> int:
+        """Run all conditions for an airfoil using direct XFoil calls."""
+        airfoil_data = self.database.get_airfoil_data(airfoil_name)
+        if not airfoil_data or not airfoil_data[1]:
+            raise ValueError(f"No point cloud data for {airfoil_name}")
+        
+        points_str = airfoil_data[1]
+        success_count = 0
+        total_conditions = len(reynolds_list) * len(mach_list) * len(alpha_list) * len(ncrit_list)
+        
+        logging.info(f"Processing {total_conditions} conditions for {airfoil_name}")
+        
+        condition_count = 0
+        for reynolds in reynolds_list:
+            for mach in mach_list:
+                for ncrit in ncrit_list:
+                    for alpha in alpha_list:
+                        condition_count += 1
+                        try:
+                            alpha_result, coeffs = self._run_xfoil_single_condition(
+                                airfoil_name, points_str, reynolds, mach, alpha, ncrit
+                            )
+                            
+                            if coeffs:
+                                self.analyzer.store_aero_coeffs(
+                                    airfoil_name, reynolds, mach, ncrit, alpha,
+                                    coeffs['Cl'], coeffs['Cd'], coeffs['Cm']
+                                )
+                                success_count += 1
+                            
+                            # Add small delay
+                            time.sleep(0.1)
+                            
+                            if condition_count % 20 == 0:
+                                logging.info(f"  Progress: {condition_count}/{total_conditions} conditions")
+                                
+                        except Exception as e:
+                            logging.debug(f"Failed {airfoil_name} Re={reynolds} M={mach} A={alpha}: {e}")
+        
+        return success_count
+
+    def _run_xfoil_single_condition(self, airfoil_name: str, points_str: str,
+                                    reynolds: float, mach: float, alpha: float, ncrit: float):
+        """
+        Run XFoil for a single condition without multiprocessing.
+        """
+        import subprocess
+        import tempfile
+        import os
+        from pathlib import Path
+        
+        temp_airfoil_path = None
+        output_file_path = None
+        XFOIL_TIMEOUT = 30
+        
+        try:
+            # Create temporary files
+            temp_dir = Path(tempfile.gettempdir())
+            timestamp = int(time.time() * 1000)
+            thread_id = threading.get_ident()
+            
+            temp_airfoil_path = temp_dir / f"airfoil_{thread_id}_{timestamp}.dat"
+            output_file_path = temp_dir / f"output_{thread_id}_{timestamp}.pol"
+            
+            # Write airfoil points
+            with open(temp_airfoil_path, 'w', encoding='utf-8') as f:
+                f.write(points_str)
+            
+            # Construct XFoil commands
+            xfoil_input = f"""load {temp_airfoil_path}
+    {airfoil_name}
+    pane
+    ppar
+    n 240
+    t 1
+
+
+    oper
+    vpar
+    n {ncrit}
+
+    iter 20
+    re {reynolds}
+    mach {mach}
+    visc
+    pacc
+    {output_file_path}
+
+    alfa {alpha}
+    pacc
+
+    quit
+    """
+            
+            # Execute XFoil
+            process = subprocess.Popen(
+                [self.xfoil_runner.xfoil_executable],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding='utf-8',
+                errors='ignore',
+                cwd=temp_dir
+            )
+            
+            stdout, stderr = process.communicate(input=xfoil_input, timeout=XFOIL_TIMEOUT)
+            
+            if process.returncode != 0:
+                return alpha, None
+            
+            # Parse results
+            if not output_file_path.exists() or output_file_path.stat().st_size == 0:
+                return alpha, None
+            
+            # Use the existing parser from XFoilRunner
+            coefficients = self.xfoil_runner._parse_polar_file(output_file_path)
+            
+            if coefficients and self.xfoil_runner._validate_coefficients(coefficients, alpha):
+                return alpha, coefficients
+            else:
+                return alpha, None
+                
+        except Exception as e:
+            logging.debug(f"XFoil error for {airfoil_name} A={alpha}: {e}")
+            return alpha, None
+            
+        finally:
+            # Cleanup
+            for f_path in [temp_airfoil_path, output_file_path]:
+                if f_path and Path(f_path).exists():
+                    try:
+                        Path(f_path).unlink()
+                    except Exception:
+                        pass
+

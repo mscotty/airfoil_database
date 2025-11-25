@@ -1,6 +1,6 @@
 # dashboard/airfoil_dashboard.py
 import dash
-from dash import dcc, html, Input, Output, State, callback_table, dash_table
+from dash import dcc, html, Input, Output, State, dash_table
 import plotly.graph_objects as go
 import plotly.express as px
 import pandas as pd
@@ -523,9 +523,9 @@ class AirfoilDashboard:
             lines.append(f"{x:.6f} {y:.6f}")
         return "\n".join(lines)
 
-    def run_server(self, debug=True, port=8050):
+    def run(self, debug=True, port=8050):
         """Run the dashboard server."""
-        self.app.run_server(debug=debug, port=port)
+        self.app.run(debug=debug, port=port)
 
 
 # Additional utility dashboard for database overview
@@ -1005,9 +1005,9 @@ class DatabaseOverviewDashboard:
         except Exception as e:
             return f"Error processing airfoils: {str(e)}"
 
-    def run_server(self, debug=True, port=8051):
+    def run(self, debug=True, port=8051):
         """Run the overview dashboard server."""
-        self.app.run_server(debug=debug, port=port)
+        self.app.run(debug=debug, port=port)
 
 
 # CSS styling for better appearance
@@ -1124,10 +1124,10 @@ def create_combined_app(database_path="airfoil_data.db", database_dir="."):
     """
 
     def run_overview_dashboard():
-        overview_dashboard.run_server(debug=False, port=8051)
+        overview_dashboard.run(debug=False, port=8051)
 
     def run_airfoil_dashboard():
-        airfoil_dashboard.run_server(debug=False, port=8050)
+        airfoil_dashboard.run(debug=False, port=8050)
 
     # Start both dashboards in separate threads
     overview_thread = threading.Thread(target=run_overview_dashboard, daemon=True)
@@ -1159,32 +1159,45 @@ def create_combined_app(database_path="airfoil_data.db", database_dir="."):
 
 # Usage example and main execution
 if __name__ == "__main__":
-    import argparse
+    # import argparse
 
-    parser = argparse.ArgumentParser(description="Launch Airfoil Database Dashboard")
-    parser.add_argument(
-        "--db-path", default="airfoil_data.db", help="Database file name"
-    )
-    parser.add_argument("--db-dir", default=".", help="Database directory")
-    parser.add_argument(
-        "--mode",
-        choices=["combined", "airfoil", "overview"],
-        default="combined",
-        help="Dashboard mode to run",
-    )
-    parser.add_argument(
-        "--port", type=int, default=8050, help="Port number for single dashboard mode"
-    )
+    # parser = argparse.ArgumentParser(description="Launch Airfoil Database Dashboard")
+    # parser.add_argument(
+    #     "--db-path", default="airfoil_data.db", help="Database file name"
+    # )
+    # parser.add_argument("--db-dir", default=".", help="Database directory")
+    # parser.add_argument(
+    #     "--mode",
+    #     choices=["combined", "airfoil", "overview"],
+    #     default="combined",
+    #     help="Dashboard mode to run",
+    # )
+    # parser.add_argument(
+    #     "--port", type=int, default=8050, help="Port number for single dashboard mode"
+    # )
 
-    args = parser.parse_args()
+    # args = parser.parse_args()
 
-    if args.mode == "combined":
-        create_combined_app(args.db_path, args.db_dir)
-    elif args.mode == "airfoil":
-        dashboard = AirfoilDashboard(args.db_path, args.db_dir)
-        print(f"Starting Airfoil Detail Dashboard on http://localhost:{args.port}")
-        dashboard.run_server(debug=True, port=args.port)
-    elif args.mode == "overview":
-        dashboard = DatabaseOverviewDashboard(args.db_path, args.db_dir)
-        print(f"Starting Database Overview Dashboard on http://localhost:{args.port}")
-        dashboard.run_server(debug=True, port=args.port)
+    # if args.mode == "combined":
+    #     create_combined_app(args.db_path, args.db_dir)
+    # elif args.mode == "airfoil":
+    #     dashboard = AirfoilDashboard(args.db_path, args.db_dir)
+    #     print(f"Starting Airfoil Detail Dashboard on http://localhost:{args.port}")
+    #     dashboard.run(debug=True, port=args.port)
+    # elif args.mode == "overview":
+    #     dashboard = DatabaseOverviewDashboard(args.db_path, args.db_dir)
+    #     print(f"Starting Database Overview Dashboard on http://localhost:{args.port}")
+    #     dashboard.run(debug=True, port=args.port)
+    mode = 'combined'  # 'combined', 'airfoil', or 'overview'
+    db_path = 'D:/Mitchell/School/2025_Winter/github/airfoil_database/airfoil_database/airfoils.db'
+    db_dir = 'D:/Mitchell/School/2025_Winter/github/airfoil_database/airfoil_database'
+    if mode == "combined":
+        create_combined_app(db_path, db_dir)
+    elif mode == "airfoil":
+        dashboard = AirfoilDashboard(db_path, db_dir)
+        print(f"Starting Airfoil Detail Dashboard on http://localhost:")
+        dashboard.run(debug=True)
+    elif mode == "overview":
+        dashboard = DatabaseOverviewDashboard(db_path, db_dir)
+        print(f"Starting Database Overview Dashboard on http://localhost:")
+        dashboard.run(debug=True)

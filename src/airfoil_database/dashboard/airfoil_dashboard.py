@@ -166,10 +166,10 @@ class AirfoilDashboard:
                                                 }
                                             ],
                                             row_selectable="multi",
-                                            page_size=15,
+                                            page_action="none",
                                             fixed_rows={"headers": True},
                                             style_table={
-                                                "height": "400px",
+                                                "height": "600px",
                                                 "overflowY": "auto",
                                             },
                                         )
@@ -824,11 +824,11 @@ class DatabaseOverviewDashboard:
                             dash_table.DataTable(
                                 data=df.to_dict("records"),
                                 columns=[{"name": i, "id": i} for i in df.columns],
-                                page_size=20,
+                                page_action="none",
                                 sort_action="native",
                                 filter_action="native",
                                 style_cell={"textAlign": "left"},
-                                style_table={"overflowX": "auto"},
+                                style_table={"overflowX": "auto", "height": "500px"},
                             ),
                         ],
                         className="twelve columns",
@@ -880,11 +880,11 @@ class DatabaseOverviewDashboard:
                                     )
                                     for i in df.columns
                                 ],
-                                page_size=20,
+                                page_action="none",
                                 sort_action="native",
                                 filter_action="native",
                                 style_cell={"textAlign": "left"},
-                                style_table={"overflowX": "auto"},
+                                style_table={"overflowX": "auto", "height": "500px"},
                             ),
                         ],
                         className="twelve columns",
@@ -1188,9 +1188,14 @@ if __name__ == "__main__":
     #     dashboard = DatabaseOverviewDashboard(args.db_path, args.db_dir)
     #     print(f"Starting Database Overview Dashboard on http://localhost:{args.port}")
     #     dashboard.run(debug=True, port=args.port)
-    mode = 'combined'  # 'combined', 'airfoil', or 'overview'
-    db_path = 'D:/Mitchell/School/2025_Winter/github/airfoil_database/airfoil_database/airfoils.db'
-    db_dir = 'D:/Mitchell/School/2025_Winter/github/airfoil_database/airfoil_database'
+    port = 8050
+    from airfoil_database.utilities.get_top_level_module import get_project_root
+    import os
+
+    root = get_project_root()
+    mode = "combined"  # 'combined', 'airfoil', or 'overview'
+    db_path = os.path.join(root, "airfoil_database", "airfoils.db")
+    db_dir = os.path.join(root, "airfoil_database")
     if mode == "combined":
         create_combined_app(db_path, db_dir)
     elif mode == "airfoil":

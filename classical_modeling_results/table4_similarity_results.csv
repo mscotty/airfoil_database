@@ -1,0 +1,6 @@
+Algorithm,Top-1 (%),Top-5 (%),Top-10 (%),MRR,Time (ms)
+KNN Euclidean 5,99.4,100.0,100.0,0.997,0.188
+KNN Euclidean 10,99.4,100.0,100.0,0.997,0.009
+KNN Cosine 5,99.3,100.0,100.0,0.996,0.144
+KNN Manhattan 5,99.1,100.0,100.0,0.996,0.036
+Random Selection,0.1,0.3,0.6,0.001,0.001

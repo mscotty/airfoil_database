@@ -1,0 +1,246 @@
+{
+  "similarity_search_summary": {
+    "total_models_evaluated": 5,
+    "best_model": "KNN_Euclidean_5",
+    "best_top1_accuracy": 0.0,
+    "best_top5_accuracy": 0.0,
+    "mission_ready": false
+  },
+  "performance_metrics": {
+    "KNN_Euclidean_5": {
+      "mean_reciprocal_rank": 0.0,
+      "top_k_accuracy": {
+        "1": 0.0,
+        "5": 0.0,
+        "10": 0.0
+      },
+      "mean_inference_time_ms": 0.9118915719682548,
+      "median_inference_time_ms": 0.0,
+      "description": "Euclidean distance in 7D feature space"
+    },
+    "KNN_Euclidean_10": {
+      "mean_reciprocal_rank": 0.0,
+      "top_k_accuracy": {
+        "1": 0.0,
+        "5": 0.0,
+        "10": 0.0
+      },
+      "mean_inference_time_ms": 0.8160303476372883,
+      "median_inference_time_ms": 0.5331039428710938,
+      "description": "Extended neighborhood for broader similarity"
+    },
+    "KNN_Manhattan_5": {
+      "mean_reciprocal_rank": 0.0,
+      "top_k_accuracy": {
+        "1": 0.0,
+        "5": 0.0,
+        "10": 0.0
+      },
+      "mean_inference_time_ms": 0.8826908735059904,
+      "median_inference_time_ms": 0.5440711975097656,
+      "description": "Manhattan distance (L1 norm)"
+    },
+    "KNN_Cosine_5": {
+      "mean_reciprocal_rank": 0.0,
+      "top_k_accuracy": {
+        "1": 0.0,
+        "5": 0.0,
+        "10": 0.0
+      },
+      "mean_inference_time_ms": 1.5747313639259457,
+      "median_inference_time_ms": 1.1548995971679688,
+      "description": "Cosine similarity (shape-based)"
+    },
+    "KNN_Minkowski_5": {
+      "mean_reciprocal_rank": 0.0,
+      "top_k_accuracy": {
+        "1": 0.0,
+        "5": 0.0,
+        "10": 0.0
+      },
+      "mean_inference_time_ms": 1.0710715950093117,
+      "median_inference_time_ms": 0.9391307830810547,
+      "description": "Minkowski distance (p=3)"
+    },
+    "Random_Selection": {
+      "mean_reciprocal_rank": 0.0006238303181534623,
+      "top_k_accuracy": {
+        "1": 0.06238303181534623,
+        "5": 0.3119151590767312,
+        "10": 0.6238303181534623
+      },
+      "mean_inference_time_ms": 0.001,
+      "median_inference_time_ms": 0.001,
+      "description": "Random selection from 1603 airfoils"
+    },
+    "Weighted_Euclidean": {
+      "mean_reciprocal_rank": 0.0,
+      "top_k_accuracy": {
+        "1": 0.0,
+        "5": 0,
+        "10": 0
+      },
+      "mean_inference_time_ms": 0.5,
+      "median_inference_time_ms": 0.5,
+      "description": "Variance-weighted Euclidean distance"
+    }
+  },
+  "mission_assessment": {
+    "best_model": "KNN_Euclidean_5",
+    "top1_accuracy_achieved": 0.0,
+    "top5_accuracy_achieved": 0.0,
+    "mrr_achieved": 0.0,
+    "inference_time_achieved": 0.9118915719682548,
+    "meets_95_percent_accuracy": false,
+    "meets_10ms_inference": "True",
+    "supports_dod_mission": false
+  },
+  "feature_analysis": {
+    "statistics": {
+      "max_thickness": {
+        "count": 1603.0,
+        "mean": -1.141389609845451e-16,
+        "std": 1.0003120611715817,
+        "min": -0.49965611856339526,
+        "25%": -0.49965611856339526,
+        "50%": -0.49965611856339526,
+        "75%": -0.3173365399893324,
+        "max": 6.110324249812243
+      },
+      "max_camber": {
+        "count": 1603.0,
+        "mean": -4.787187489837232e-16,
+        "std": 1.0003120611715834,
+        "min": -2.027942229073632,
+        "25%": -0.5213708042895505,
+        "50%": -0.045045018326030244,
+        "75%": 0.5074287734750641,
+        "max": 20.391609025916495
+      },
+      "leading_edge_radius": {
+        "count": 1603.0,
+        "mean": -5.851006932023282e-16,
+        "std": 1.0003120611715837,
+        "min": -0.8940381167815671,
+        "25%": -0.4486083387054196,
+        "50%": -0.18389555538039004,
+        "75%": 0.15332688286792767,
+        "max": 13.766961282414222
+      },
+      "trailing_edge_angle": {
+        "count": 1603.0,
+        "mean": 7.579713525575616e-16,
+        "std": 1.0003120611715843,
+        "min": -3.3422040710868153,
+        "25%": -0.7430563694241943,
+        "50%": -0.04192653419872499,
+        "75%": 0.41101868676947495,
+        "max": 8.979098037640009
+      },
+      "thickness_to_chord_ratio": {
+        "count": 1603.0,
+        "mean": 1.845061845041433e-16,
+        "std": 1.0003120611715932,
+        "min": -0.49966917599581623,
+        "25%": -0.49966917599581623,
+        "50%": -0.49966917599581623,
+        "75%": -0.3172955010468586,
+        "max": 6.109916523288413
+      },
+      "chord_length": {
+        "count": 1603.0,
+        "mean": 6.180476245849312e-12,
+        "std": 1.000312061171584,
+        "min": -3.5441251819866055,
+        "25%": -0.5457038600367176,
+        "50%": 0.3345666198014118,
+        "75%": 0.8077120027147575,
+        "max": 1.0002711701794629
+      },
+      "aspect_ratio": {
+        "count": 1603.0,
+        "mean": 9.623452516607312e-12,
+        "std": 1.0003120611715828,
+        "min": -1.0000622765264675,
+        "25%": -0.8076065792826596,
+        "50%": -0.33465821073183794,
+        "75%": 0.5454622479670712,
+        "max": 3.5454878344017886
+      }
+    },
+    "correlations": {
+      "max_thickness": {
+        "max_thickness": 1.0,
+        "max_camber": -0.0893456611901152,
+        "leading_edge_radius": 0.23287373840791026,
+        "trailing_edge_angle": 0.04334540322925,
+        "thickness_to_chord_ratio": 0.9999999879217624,
+        "chord_length": 0.16768755836915952,
+        "aspect_ratio": -0.16766566785102582
+      },
+      "max_camber": {
+        "max_thickness": -0.0893456611901152,
+        "max_camber": 1.0,
+        "leading_edge_radius": 0.3803452193759193,
+        "trailing_edge_angle": 0.07090662217320844,
+        "thickness_to_chord_ratio": -0.08932039814789546,
+        "chord_length": -0.0076200153131822474,
+        "aspect_ratio": 0.007589300700521
+      },
+      "leading_edge_radius": {
+        "max_thickness": 0.23287373840791026,
+        "max_camber": 0.3803452193759193,
+        "leading_edge_radius": 1.0,
+        "trailing_edge_angle": 0.16072076430430565,
+        "thickness_to_chord_ratio": 0.23285000439751047,
+        "chord_length": 0.2389205427479903,
+        "aspect_ratio": -0.23892100060933763
+      },
+      "trailing_edge_angle": {
+        "max_thickness": 0.04334540322925,
+        "max_camber": 0.07090662217320844,
+        "leading_edge_radius": 0.16072076430430565,
+        "trailing_edge_angle": 1.0,
+        "thickness_to_chord_ratio": 0.04334871716251438,
+        "chord_length": -0.07404825969016819,
+        "aspect_ratio": 0.07404096322736382
+      },
+      "thickness_to_chord_ratio": {
+        "max_thickness": 0.9999999879217624,
+        "max_camber": -0.08932039814789546,
+        "leading_edge_radius": 0.23285000439751047,
+        "trailing_edge_angle": 0.04334871716251438,
+        "thickness_to_chord_ratio": 1.0,
+        "chord_length": 0.16762443361714816,
+        "aspect_ratio": -0.16760254848992062
+      },
+      "chord_length": {
+        "max_thickness": 0.16768755836915952,
+        "max_camber": -0.0076200153131822474,
+        "leading_edge_radius": 0.2389205427479903,
+        "trailing_edge_angle": -0.07404825969016819,
+        "thickness_to_chord_ratio": 0.16762443361714816,
+        "chord_length": 1.0,
+        "aspect_ratio": -0.9999999792219687
+      },
+      "aspect_ratio": {
+        "max_thickness": -0.16766566785102582,
+        "max_camber": 0.007589300700521,
+        "leading_edge_radius": -0.23892100060933763,
+        "trailing_edge_angle": 0.07404096322736382,
+        "thickness_to_chord_ratio": -0.16760254848992062,
+        "chord_length": -0.9999999792219687,
+        "aspect_ratio": 1.0
+      }
+    },
+    "variance": {
+      "max_thickness": 1.000624219725338,
+      "max_camber": 1.0006242197253417,
+      "leading_edge_radius": 1.0006242197253423,
+      "trailing_edge_angle": 1.0006242197253437,
+      "thickness_to_chord_ratio": 1.0006242197253612,
+      "chord_length": 1.000624219725343,
+      "aspect_ratio": 1.0006242197253403
+    }
+  }
+}

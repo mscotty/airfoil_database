@@ -1,0 +1,11 @@
+Algorithm,Top-1 Accuracy (%),Top-5 Accuracy (%),Inference Time (ms),Overfitting Gap (%)
+KNN 5,0.0,N/A,0.118,99.8
+KNN 10,0.0,N/A,0.442,99.8
+SVM RBF,0.0,N/A,7.336,99.8
+SVM Linear,0.0,N/A,7.317,99.8
+Naive Bayes,0.0,N/A,0.181,99.8
+Logistic Regression,0.0,N/A,0.012,13.1
+Random Prediction,0.3,1.6,0.001,0.0
+Most Frequent,0.0,N/A,0.001,0.0
+Random Forest,0.0,N/A,0.615,99.7
+Random Forest Deep,0.0,N/A,1.513,99.8

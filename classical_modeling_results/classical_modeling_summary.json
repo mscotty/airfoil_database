@@ -1,0 +1,164 @@
+{
+  "classical_modeling_summary": {
+    "total_models_evaluated": 8,
+    "best_model": "KNN_5",
+    "best_accuracy": 0.0,
+    "mission_ready": false
+  },
+  "performance_metrics": {
+    "Random_Prediction": {
+      "top1_accuracy": 0.3115264797507788,
+      "top5_accuracy": 1.557632398753894,
+      "inference_time_ms": 0.001,
+      "description": "Random selection from 321 classes"
+    },
+    "Most_Frequent": {
+      "top1_accuracy": 0.0,
+      "top5_accuracy": 0.0,
+      "inference_time_ms": 0.001,
+      "description": "Always predict most frequent class"
+    },
+    "KNN_5": {
+      "top1_accuracy": 0.0,
+      "top5_accuracy": null,
+      "inference_time_ms": 0.11838039505147488,
+      "training_time_s": 0.0029976367950439453,
+      "validation_accuracy": 0.0,
+      "training_accuracy": 99.79188345473466,
+      "overfitting_gap": 99.79188345473466,
+      "model_object": "KNeighborsClassifier(weights='distance')"
+    },
+    "KNN_10": {
+      "top1_accuracy": 0.0,
+      "top5_accuracy": null,
+      "inference_time_ms": 0.4423763893103674,
+      "training_time_s": 0.0030066967010498047,
+      "validation_accuracy": 0.0,
+      "training_accuracy": 99.79188345473466,
+      "overfitting_gap": 99.79188345473466,
+      "model_object": "KNeighborsClassifier(n_neighbors=10, weights='distance')"
+    },
+    "SVM_RBF": {
+      "top1_accuracy": 0.0,
+      "top5_accuracy": null,
+      "inference_time_ms": 7.335621991261515,
+      "training_time_s": 10.556617259979248,
+      "validation_accuracy": 0.0,
+      "training_accuracy": 99.79188345473466,
+      "overfitting_gap": 99.79188345473466,
+      "model_object": "SVC(probability=True, random_state=42)"
+    },
+    "SVM_Linear": {
+      "top1_accuracy": 0.0,
+      "top5_accuracy": null,
+      "inference_time_ms": 7.317163491174811,
+      "training_time_s": 10.657328128814697,
+      "validation_accuracy": 0.0,
+      "training_accuracy": 99.79188345473466,
+      "overfitting_gap": 99.79188345473466,
+      "model_object": "SVC(kernel='linear', probability=True, random_state=42)"
+    },
+    "Random_Forest": {
+      "top1_accuracy": 0.0,
+      "top5_accuracy": null,
+      "inference_time_ms": 0.6149030548761196,
+      "training_time_s": 4.498205900192261,
+      "validation_accuracy": 0.0,
+      "training_accuracy": 99.68782518210197,
+      "overfitting_gap": 99.68782518210197,
+      "model_object": "RandomForestClassifier(max_depth=20, random_state=42)"
+    },
+    "Random_Forest_Deep": {
+      "top1_accuracy": 0.0,
+      "top5_accuracy": null,
+      "inference_time_ms": 1.5131409665877202,
+      "training_time_s": 14.551630735397339,
+      "validation_accuracy": 0.0,
+      "training_accuracy": 99.79188345473466,
+      "overfitting_gap": 99.79188345473466,
+      "model_object": "RandomForestClassifier(n_estimators=200, random_state=42)"
+    },
+    "Naive_Bayes": {
+      "top1_accuracy": 0.0,
+      "top5_accuracy": null,
+      "inference_time_ms": 0.1806871170566832,
+      "training_time_s": 0.06499862670898438,
+      "validation_accuracy": 0.0,
+      "training_accuracy": 99.79188345473466,
+      "overfitting_gap": 99.79188345473466,
+      "model_object": "GaussianNB()"
+    },
+    "Logistic_Regression": {
+      "top1_accuracy": 0.0,
+      "top5_accuracy": null,
+      "inference_time_ms": 0.012463869706863926,
+      "training_time_s": 1.5912656784057617,
+      "validation_accuracy": 0.0,
+      "training_accuracy": 13.111342351716962,
+      "overfitting_gap": 13.111342351716962,
+      "model_object": "LogisticRegression(max_iter=2000, multi_class='multinomial', random_state=42)"
+    }
+  },
+  "mission_assessment": {
+    "best_model": "KNN_5",
+    "accuracy_achieved": 0.0,
+    "inference_time_achieved": 0.11838039505147488,
+    "meets_95_percent_accuracy": false,
+    "meets_10ms_inference": true,
+    "supports_dod_mission": false,
+    "overfitting_assessment": "Concerning"
+  },
+  "feature_contributions": {
+    "max_thickness": {
+      "f_score": NaN,
+      "p_value": NaN,
+      "rf_importance": 0.10091189756246662,
+      "significant": "False"
+    },
+    "max_camber": {
+      "f_score": NaN,
+      "p_value": NaN,
+      "rf_importance": 0.16203117548274712,
+      "significant": "False"
+    },
+    "leading_edge_radius": {
+      "f_score": NaN,
+      "p_value": NaN,
+      "rf_importance": 0.17580090217028502,
+      "significant": "False"
+    },
+    "trailing_edge_angle": {
+      "f_score": NaN,
+      "p_value": NaN,
+      "rf_importance": 0.17840154692556748,
+      "significant": "False"
+    },
+    "thickness_to_chord_ratio": {
+      "f_score": NaN,
+      "p_value": NaN,
+      "rf_importance": 0.10463281832707096,
+      "significant": "False"
+    },
+    "chord_length": {
+      "f_score": NaN,
+      "p_value": NaN,
+      "rf_importance": 0.1413766467142988,
+      "significant": "False"
+    },
+    "aspect_ratio": {
+      "f_score": NaN,
+      "p_value": NaN,
+      "rf_importance": 0.136845012817564,
+      "significant": "False"
+    }
+  },
+  "document_compliance": {
+    "table4_generated": true,
+    "figures_created": [
+      "performance_comparison",
+      "overfitting_analysis"
+    ],
+    "trivial_models_included": true,
+    "overfitting_monitored": true
+  }
+}

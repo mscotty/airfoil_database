@@ -1,0 +1,8 @@
+Algorithm,Top-1 Accuracy (%),Top-5 Accuracy (%),Top-10 Accuracy (%),Mean Reciprocal Rank,Inference Time (ms)
+KNN Euclidean 5,0.0,0.0,0.0,0.000,0.912
+KNN Euclidean 10,0.0,0.0,0.0,0.000,0.816
+KNN Manhattan 5,0.0,0.0,0.0,0.000,0.883
+KNN Cosine 5,0.0,0.0,0.0,0.000,1.575
+KNN Minkowski 5,0.0,0.0,0.0,0.000,1.071
+Weighted Euclidean,0.0,0.0,0.0,0.000,0.500
+Random Selection,0.1,0.3,0.6,0.001,0.001
